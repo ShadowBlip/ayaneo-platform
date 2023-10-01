@@ -1,0 +1,8 @@
+menuconfig AYN_PLATFORM
+	tristate "Ayaneo x86 PWM Control Support"
+	select LEDS_CLASS
+	select LEDS_CLASS_MULTICOLOR
+	help
+	  This driver provides support for Ayaneo x86 Handheld
+	  Consoles by providing an RGB LED control via a
+	  multicolor LED sysfs interface.
