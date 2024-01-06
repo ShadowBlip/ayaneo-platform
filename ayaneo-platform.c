@@ -16,6 +16,7 @@
 #include <linux/module.h>
 #include <linux/platform_device.h>
 #include <linux/processor.h>
+#include <linux/delay.h>
 
 /* Handle ACPI lock mechanism */
 static u32 ayaneo_mutex;
@@ -33,47 +34,90 @@ static bool unlock_global_acpi_lock(void)
 }
 
 /* Common ec ram port data */
-#define AYANEO_ADDR_PORT 	0x4e;
-#define AYANEO_DATA_PORT 	0x4f;
-#define AYANEO_HIGH_BYTE 	0xd1;
-#define AYANEO_LED_MC_OFF	0x31;
-#define AYANEO_LED_MC_ON	0x37;
+#define AYANEO_ADDR_PORT 	0x4e
+#define AYANEO_DATA_PORT 	0x4f
+#define AYANEO_HIGH_BYTE 	0xd1
+#define AYANEO_LED_MC_OFF	0x31
+#define AYANEO_LED_MC_ON	0x37
 
 
 /* RGB LED EC Ram Registers */
-#define AYANEO_LED_MC_L_Q1_R	0xb3;
-#define AYANEO_LED_MC_L_Q1_G	0xb4;
-#define AYANEO_LED_MC_L_Q1_B	0xb5;
-#define AYANEO_LED_MC_L_Q2_R	0xb6;
-#define AYANEO_LED_MC_L_Q2_G	0xb7;
-#define AYANEO_LED_MC_L_Q2_B	0xb8;
-#define AYANEO_LED_MC_L_Q3_R	0xb9;
-#define AYANEO_LED_MC_L_Q3_G	0xba;
-#define AYANEO_LED_MC_L_Q3_B	0xbb;
-#define AYANEO_LED_MC_L_Q4_R	0xbc;
-#define AYANEO_LED_MC_L_Q4_G	0xbd;
-#define AYANEO_LED_MC_L_Q4_B	0xbe;
-#define AYANEO_LED_MC_R_Q1_R	0x73;
-#define AYANEO_LED_MC_R_Q1_G	0x74;
-#define AYANEO_LED_MC_R_Q1_B	0x75;
-#define AYANEO_LED_MC_R_Q2_R	0x76;
-#define AYANEO_LED_MC_R_Q2_G	0x77;
-#define AYANEO_LED_MC_R_Q2_B	0x78;
-#define AYANEO_LED_MC_R_Q3_R	0x79;
-#define AYANEO_LED_MC_R_Q3_G	0x7a;
-#define AYANEO_LED_MC_R_Q3_B	0x7b;
-#define AYANEO_LED_MC_R_Q4_R	0x7c;
-#define AYANEO_LED_MC_R_Q4_G	0x7d;
-#define AYANEO_LED_MC_R_Q4_B	0x7e;
+#define AYANEO_LED_MC_L_Q1_R	0xb3
+#define AYANEO_LED_MC_L_Q1_G	0xb4
+#define AYANEO_LED_MC_L_Q1_B	0xb5
+#define AYANEO_LED_MC_L_Q2_R	0xb6
+#define AYANEO_LED_MC_L_Q2_G	0xb7
+#define AYANEO_LED_MC_L_Q2_B	0xb8
+#define AYANEO_LED_MC_L_Q3_R	0xb9
+#define AYANEO_LED_MC_L_Q3_G	0xba
+#define AYANEO_LED_MC_L_Q3_B	0xbb
+#define AYANEO_LED_MC_L_Q4_R	0xbc
+#define AYANEO_LED_MC_L_Q4_G	0xbd
+#define AYANEO_LED_MC_L_Q4_B	0xbe
+#define AYANEO_LED_MC_R_Q1_R	0x73
+#define AYANEO_LED_MC_R_Q1_G	0x74
+#define AYANEO_LED_MC_R_Q1_B	0x75
+#define AYANEO_LED_MC_R_Q2_R	0x76
+#define AYANEO_LED_MC_R_Q2_G	0x77
+#define AYANEO_LED_MC_R_Q2_B	0x78
+#define AYANEO_LED_MC_R_Q3_R	0x79
+#define AYANEO_LED_MC_R_Q3_G	0x7a
+#define AYANEO_LED_MC_R_Q3_B	0x7b
+#define AYANEO_LED_MC_R_Q4_R	0x7c
+#define AYANEO_LED_MC_R_Q4_G	0x7d
+#define AYANEO_LED_MC_R_Q4_B	0x7e
 
-#define UNCLEAR_CMD_1		0x86;
-#define UNCLEAR_CMD_2		0xc6;
+#define UNCLEAR_CMD_1		0x86
+#define UNCLEAR_CMD_2		0xc6
+/* Schema:
+#
+# 0x6d - LED PWM control (0x03)
+#
+# 0xb1 - Support for 4 zones and RGB color
+#
+#   RGB colors:
+#
+#   1 - Red
+#   2 - Green
+#   3 - Blue
+#
+#   Zones:
+#
+#   Right (2), Down (5), Left (8) , Up (11)
+#
+#   Note: Set 0xb1 to 02 for off.
+#
+# 0xb2 - Sets brightness, requires b1 to be set at the same time.
+#
+#   00-ff - brightness from 0-255.  Not noticeable to me above 128.
+#
+# 0xbf - Set expected mode
+#
+#   0x10 - Enable
+#   0xe2 - Tint (+ Red for Purple, + Green for Teal)
+#   0xe3-0e5 - Tint + blink (unused)
+#
+#   0xff - Close channel
+*/
+/* EC Controlled RGB registers */
+#define AYANEO_LED_PWM_CONTROL	0x6d
+#define AYANEO_LED_POS_COLOR	0xb1
+#define AYANEO_LED_BRIGHTNESS	0xb2
+#define AYANEO_LED_MODE_REG     0xbf
+
+#define AYANEO_LED_CMD_OFF	0x02
+
+/* RGB Mode values */
+#define AYANEO_LED_MODE_WRITE             0x10 /* Default write mode */
+#define AYANEO_LED_MODE_WRITE_END         0xff /* close channel */
+
 
 enum ayaneo_model {
 	air = 1,
-	air_1s
+	air_1s,
 	air_pro,
 	air_plus,
+        air_plus_mendo,
 	geek,
 	geek_1s,
 	ayaneo_2,
@@ -85,15 +129,16 @@ static enum ayaneo_model model;
 static const struct dmi_system_id dmi_table[] = {
 	{
 		.matches = {
-			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, ""),
-			DMI_EXACT_MATCH(DMI_BOARD_NAME, ""),
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AB05-Mendocino"),
 		},
-		.driver_data = (void *)air,
+		.driver_data = (void *)air_plus_mendo,
 	},
 	{},
 };
 
 /* Helper functions to handle EC read/write */
+/*
 static int read_from_ec(u8 reg, int size, long *val)
 {
 	int i;
@@ -117,7 +162,7 @@ static int read_from_ec(u8 reg, int size, long *val)
 
 	return 0;
 }
-
+*/
 static int write_to_ec(u8 reg, u8 val)
 {
 	int ret;
@@ -163,27 +208,57 @@ static void write_ec_ram(u8 index, u8 val)
         outb(val, AYANEO_DATA_PORT);
 }
 
-static void ayaneo_led_mc_open()
+static void ayaneo_led_mc_open(void)
 {
 	write_ec_ram(0x87, 0xa5);
 }
 
-static coid ayaneo_led_mc_close(u8 index)
+static void ayaneo_led_mc_close(u8 index)
 {
 	write_ec_ram(index, 0x01);
 }
 
-static void ayaneo_led_mc_write()
+static void ayaneo_led_mc_write(void)
 {
 	ayaneo_led_mc_open();
 	write_ec_ram(0x70, 0x00);
 	ayaneo_led_mc_close(0x86);
 }
 
+static void ayaneo_led_mc_set(u8 color, u8 brightness)
+{
+        write_to_ec(AYANEO_LED_PWM_CONTROL, 0x03);
+        write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE);
+        write_to_ec(AYANEO_LED_POS_COLOR, color);
+        write_to_ec(AYANEO_LED_BRIGHTNESS, brightness);
+        msleep(5);
+        write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE_END);
+}
+/*
+static void ayaneo_led_mc_off(void)
+{
+	ayaneo_led_mc_set(AYANEO_LED_CMD_OFF, 0x00);
+}
+*/
 /* RGB LED Logic */
 static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
                                       enum led_brightness brightness)
 {
+        struct led_classdev_mc *mc_cdev = lcdev_to_mccdev(led_cdev);
+	int val;
+        int i, j, zone;
+	struct mc_subled s_led;
+        u8 zones[4] = {2, 5, 8, 11};
+
+	led_cdev->brightness = brightness;
+
+        for (zone = 0; zone < 4; zone++) {
+	        for (i = 0; i < mc_cdev->num_colors; i++) {
+		        s_led = mc_cdev->subled_info[i];
+	        	val = brightness * s_led.intensity / led_cdev->max_brightness;
+		        ayaneo_led_mc_set(zones[zone] + s_led.channel, val);
+	        }
+        }
 };
 
 static enum led_brightness ayaneo_led_mc_brightness_get(struct led_classdev *led_cdev)
@@ -191,29 +266,24 @@ static enum led_brightness ayaneo_led_mc_brightness_get(struct led_classdev *led
 	return led_cdev->brightness;
 };
 
-static struct attribute *ayaneo_led_mc_attrs[] = {
-	&dev_attr_led_mode.attr,
-	NULL,
-};
-
 struct mc_subled ayaneo_led_mc_subled_info[] = {
         {
                 .color_index = LED_COLOR_ID_RED,
                 .brightness = 0,
                 .intensity = 0,
-                .channel = AYN_LED_MC_R_REG,
+                .channel = 1,
         },
         {
                 .color_index = LED_COLOR_ID_GREEN,
                 .brightness = 0,
                 .intensity = 0,
-                .channel = AYN_LED_MC_B_REG,
+                .channel = 2,
         },
         {
                 .color_index = LED_COLOR_ID_BLUE,
                 .brightness = 0,
                 .intensity = 0,
-                .channel = AYN_LED_MC_G_REG,
+                .channel = 3,
         },
 };
 
@@ -236,11 +306,12 @@ static int ayaneo_platform_probe(struct platform_device *pdev)
 	int ret;
 
         ret = devm_led_classdev_multicolor_register(dev, &ayaneo_led_mc);
-	if (ret)
-		return ret;
+        
+	//if (ret)
+	return ret;
 
-	hwdev = devm_device_register("TODO")
-	return PTR_ERR_OR_ZERO(hwdev);
+	//hwdev = devm_device_register("TODO");
+	//return PTR_ERR_OR_ZERO(hwdev);
 }
 
 static struct platform_driver ayaneo_platform_driver = {

@@ -1,4 +1,4 @@
-menuconfig AYN_PLATFORM
+menuconfig AYANEO_PLATFORM
 	tristate "Ayaneo x86 PWM Control Support"
 	select LEDS_CLASS
 	select LEDS_CLASS_MULTICOLOR
