@@ -258,13 +258,13 @@ static void probe_ec_ram_index(u8 index)
         outb(0x12, AYANEO_DATA_PORT);
         outb(0x2f, AYANEO_ADDR_PORT);
 }
-
+/*
 static u8 read_ec_ram(u8 index)
 {
 	probe_ec_ram_index(index);
 	return inb(AYANEO_DATA_PORT);
 }
-
+*/
 static void write_ec_ram(u8 index, u8 val)
 {
 	probe_ec_ram_index(index);
@@ -286,6 +286,142 @@ static void ayaneo_led_mc_write(void)
 	ayaneo_led_mc_open();
 	write_ec_ram(0x70, 0x00);
 	ayaneo_led_mc_close(0x86);
+}
+
+static void ayaneo_led_mc_state(u8 state) {
+  // 0x31 = off
+  // 0x37 = on
+  u8 zone[2] = {0xb2, 0x72};
+  u8 zoneindex;
+  for (zoneindex = 0; zoneindex < 2; zoneindex++) {
+    ayaneo_led_mc_open();
+    write_ec_ram(zone[zoneindex], state);
+    ayaneo_led_mc_close(0xc6);
+    ayaneo_led_mc_write();
+  }
+}
+
+static void ayaneo_led_mc_enable(void) {
+  ayaneo_led_mc_state(AYANEO_LED_MC_ON);
+  ayaneo_led_mc_write();
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0xbf, 0x0);
+  ayaneo_led_mc_close(0xc6);
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0x7f, 0x0);
+  ayaneo_led_mc_close(0xc6);
+
+  ayaneo_led_mc_write();
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0xc0, 0x0);
+  ayaneo_led_mc_close(0xc6);
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0x80, 0x0);
+  ayaneo_led_mc_close(0x86);
+
+  ayaneo_led_mc_write();
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0xc1, 0x5);
+  ayaneo_led_mc_close(0xc6);
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0x81, 0x5);
+  ayaneo_led_mc_close(0xc6);
+
+  ayaneo_led_mc_write();
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0xc2, 0x5);
+  ayaneo_led_mc_close(0xc6);
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0x82, 0x5);
+  ayaneo_led_mc_close(0x86);
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0x70, 0x0);
+  ayaneo_led_mc_close(0x86);
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0xc3, 0x5);
+  ayaneo_led_mc_close(0x86);
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0x83, 0x5);
+  ayaneo_led_mc_close(0x86);
+
+  ayaneo_led_mc_write();
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0xc4, 0x5);
+  ayaneo_led_mc_close(0xc6);
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0x84, 0x5);
+  ayaneo_led_mc_close(0x86);
+
+  ayaneo_led_mc_write();
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0xc5, 0x7);
+  ayaneo_led_mc_close(0xc6);
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0x85, 0x7);
+  ayaneo_led_mc_close(0x86);
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0x70, 0x0);
+  ayaneo_led_mc_close(0x86);
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0xc5, 0x7);
+  ayaneo_led_mc_close(0xc6);
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0x85, 0x7);
+  ayaneo_led_mc_close(0x86);
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0x70, 0x0);
+  ayaneo_led_mc_close(0x86);
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0xb2, 0xba);
+  ayaneo_led_mc_close(0xc6);
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0x72, 0xba);
+  ayaneo_led_mc_close(0x86);
+
+  ayaneo_led_mc_open();
+    write_ec_ram(0x70, 0x0);
+  ayaneo_led_mc_close(0x86);
+
+  ayaneo_led_mc_write();
+
+}
+
+static void ayaneo_led_mc_color(u8 *color) {
+  u8 quadrant;
+  
+  // Zone 1 (Left Stick)
+  for(quadrant = 0; quadrant < 12; quadrant++) {
+          ayaneo_led_mc_open();
+          write_ec_ram(0xB3 + quadrant, color[quadrant % 3]); // Quadrant 1
+          ayaneo_led_mc_write(); 
+  }
+  // Zone 2 (Right Stick)
+  for(quadrant = 0; quadrant < 12; quadrant++) {
+          ayaneo_led_mc_open();
+          write_ec_ram(0x73 + quadrant, color[quadrant % 3]); // Quadrant 1
+          ayaneo_led_mc_write(); 
+  }
 }
 
 static void ayaneo_led_mc_set(u8 color, u8 brightness)
@@ -345,6 +481,9 @@ static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
 			ayaneo_led_mc_intensity(color);
 			break;
 	        case air_plus:
+	                ayaneo_led_mc_state(AYANEO_LED_MC_OFF);
+	                ayaneo_led_mc_color(color);
+	                ayaneo_led_mc_enable();
 	                break;
 	        default:
 		        break;
