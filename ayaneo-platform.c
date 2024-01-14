@@ -95,7 +95,7 @@ static bool unlock_global_acpi_lock(void)
 #
 #   0x10 - Enable
 #   0xe2 - Tint (+ Red for Purple, + Green for Teal)
-#   0xe3-0e5 - Tint + blink (unused)
+#   0xe3-0xe5 - Tint + blink (unused)
 #
 #   0xff - Close channel
 */
@@ -130,9 +130,72 @@ static const struct dmi_system_id dmi_table[] = {
 	{
 		.matches = {
 			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AIR"),
+		},
+		.driver_data = (void *)air,
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AIR 1S"),
+		},
+		.driver_data = (void *)air_1s,
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AIR 1S Limited"),
+		},
+		.driver_data = (void *)air_1s,
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AIR Pro"),
+		},
+		.driver_data = (void *)air_pro,
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AB05-AMD"),
+		},
+		.driver_data = (void *)air_plus,
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
 			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AB05-Mendocino"),
 		},
 		.driver_data = (void *)air_plus_mendo,
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "GEEK"),
+		},
+		.driver_data = (void *)geek,
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "GEEK 1S"),
+		},
+		.driver_data = (void *)geek_1s,
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AYANEO 2"),
+		},
+		.driver_data = (void *)ayaneo_2,
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AYANEO 2S"),
+		},
+		.driver_data = (void *)ayaneo_2s,
 	},
 	{},
 };
@@ -227,17 +290,29 @@ static void ayaneo_led_mc_write(void)
 
 static void ayaneo_led_mc_set(u8 color, u8 brightness)
 {
-        write_to_ec(AYANEO_LED_PWM_CONTROL, 0x03);
         write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE);
         write_to_ec(AYANEO_LED_POS_COLOR, color);
         write_to_ec(AYANEO_LED_BRIGHTNESS, brightness);
         msleep(5);
         write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE_END);
 }
+
+static void ayaneo_led_mc_intensity(u8 *color)
+{
+        u8 zones[4] = {2, 5, 8, 11};
+        int zone;
+
+        write_to_ec(AYANEO_LED_PWM_CONTROL, 0x03);
+        for (zone = 0; zone < 4; zone++) {
+		ayaneo_led_mc_set(zones[zone] + 1, color[0]);
+		ayaneo_led_mc_set(zones[zone] + 2, color[1]);
+		ayaneo_led_mc_set(zones[zone] + 3, color[2]);
+        }
+}
 /*
 static void ayaneo_led_mc_off(void)
 {
-	ayaneo_led_mc_set(AYANEO_LED_CMD_OFF, 0x00);
+	ayaneo_led_mc_set(AYANEO_LED_CMD_OFF, 0xc0);
 }
 */
 /* RGB LED Logic */
@@ -246,19 +321,34 @@ static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
 {
         struct led_classdev_mc *mc_cdev = lcdev_to_mccdev(led_cdev);
 	int val;
-        int i, j, zone;
+        int i;
 	struct mc_subled s_led;
-        u8 zones[4] = {2, 5, 8, 11};
+        u8 color[3];
 
 	led_cdev->brightness = brightness;
 
-        for (zone = 0; zone < 4; zone++) {
-	        for (i = 0; i < mc_cdev->num_colors; i++) {
-		        s_led = mc_cdev->subled_info[i];
-	        	val = brightness * s_led.intensity / led_cdev->max_brightness;
-		        ayaneo_led_mc_set(zones[zone] + s_led.channel, val);
-	        }
-        }
+	for (i = 0; i < mc_cdev->num_colors; i++) {
+		s_led = mc_cdev->subled_info[i];
+	        val = brightness * s_led.intensity / led_cdev->max_brightness;
+	        color[s_led.channel] = val;
+	}
+
+	switch (model) {
+		case air:
+		case air_1s:
+		case air_pro:
+		case air_plus_mendo:
+		case geek:
+		case geek_1s:
+		case ayaneo_2:
+		case ayaneo_2s:
+			ayaneo_led_mc_intensity(color);
+			break;
+	        case air_plus:
+	                break;
+	        default:
+		        break;
+	}
 };
 
 static enum led_brightness ayaneo_led_mc_brightness_get(struct led_classdev *led_cdev)
@@ -271,19 +361,19 @@ struct mc_subled ayaneo_led_mc_subled_info[] = {
                 .color_index = LED_COLOR_ID_RED,
                 .brightness = 0,
                 .intensity = 0,
-                .channel = 1,
+                .channel = 0,
         },
         {
                 .color_index = LED_COLOR_ID_GREEN,
                 .brightness = 0,
                 .intensity = 0,
-                .channel = 2,
+                .channel = 1,
         },
         {
                 .color_index = LED_COLOR_ID_BLUE,
                 .brightness = 0,
                 .intensity = 0,
-                .channel = 3,
+                .channel = 2,
         },
 };
 
@@ -302,15 +392,25 @@ struct led_classdev_mc ayaneo_led_mc = {
 static int ayaneo_platform_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	struct device *hwdev;
+	//struct platform_device *platform_dev;
+	//struct device *hwdev;
+	const struct dmi_system_id *match;
 	int ret;
 
-        ret = devm_led_classdev_multicolor_register(dev, &ayaneo_led_mc);
+	match = dmi_first_match(dmi_table);
+	ret = PTR_ERR_OR_ZERO(match);
+	if (ret)
+	        return ret;
+        model = (enum ayaneo_model)match->driver_data;
         
-	//if (ret)
-	return ret;
-
+        ret = devm_led_classdev_multicolor_register(dev, &ayaneo_led_mc);
+//	if (ret)
+//	        return ret;
+        return ret;
 	//hwdev = devm_device_register("TODO");
+	/* register a platform device to act as the parent for LEDS, etc. */
+	//platform_dev = platform_device_register_simple("ayaneo-platform", -1, NULL, 0);
+	//hwdev = &platform_dev->dev;
 	//return PTR_ERR_OR_ZERO(hwdev);
 }
 
