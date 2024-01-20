@@ -460,11 +460,16 @@ static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
         int i;
 	struct mc_subled s_led;
         u8 color[3];
+        
+        if (brightness < 0 || brightness > 255)
+	        return;
 
 	led_cdev->brightness = brightness;
 
 	for (i = 0; i < mc_cdev->num_colors; i++) {
 		s_led = mc_cdev->subled_info[i];
+		if (s_led.intensity < 0 || s_led.intensity > 255)
+	                return;
 	        val = brightness * s_led.intensity / led_cdev->max_brightness;
 	        color[s_led.channel] = val;
 	}
