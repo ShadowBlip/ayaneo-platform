@@ -201,7 +201,7 @@ static const struct dmi_system_id dmi_table[] = {
 };
 
 /* Helper functions to handle EC read/write */
-
+/*
 static int read_from_ec(u8 reg, int size, long *val)
 {
 	int i;
@@ -225,7 +225,7 @@ static int read_from_ec(u8 reg, int size, long *val)
 
 	return 0;
 }
-
+*/
 static int write_to_ec(u8 reg, u8 val)
 {
 	int ret;
@@ -416,12 +416,35 @@ static void ayaneo_led_mc_intensity(u8 *color)
 		ayaneo_led_mc_set(zones[zone] + 3, color[2]);
         }
 }
-/*
+
 static void ayaneo_led_mc_off(void)
 {
-	ayaneo_led_mc_set(AYANEO_LED_CMD_OFF, 0xc0);
+        write_to_ec(AYANEO_LED_PWM_CONTROL, 0x03);
+	ayaneo_led_mc_set(AYANEO_LED_CMD_OFF, 0xc0); // set all leds to off
+	ayaneo_led_mc_set(AYANEO_LED_CMD_OFF, 0x80); // needed to switch leds on again
 }
-*/
+
+static void ayaneo_led_mc_take_control(void)
+{
+        switch (model) {
+		case air:
+		case air_1s:
+		case air_pro:
+		case air_plus_mendo:
+		case geek:
+		case geek_1s:
+		case ayaneo_2:
+		case ayaneo_2s:
+			ayaneo_led_mc_off();
+			break;
+	        case air_plus:
+	                ayaneo_led_mc_state(AYANEO_LED_MC_OFF);
+	                break;
+	        default:
+		        break;
+	}
+}
+
 /* RGB LED Logic */
 static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
                                       enum led_brightness brightness)
@@ -457,7 +480,7 @@ static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
 			ayaneo_led_mc_intensity(color);
 			break;
 	        case air_plus:
-	                ayaneo_led_mc_state(AYANEO_LED_MC_OFF);
+	                //ayaneo_led_mc_state(AYANEO_LED_MC_OFF);
 	                ayaneo_led_mc_color(color);
 	                ayaneo_led_mc_enable();
 	                break;
@@ -517,6 +540,7 @@ static int ayaneo_platform_probe(struct platform_device *pdev)
 	if (ret)
 	        return ret;
         model = (enum ayaneo_model)match->driver_data;
+        ayaneo_led_mc_take_control();
         
         ret = devm_led_classdev_multicolor_register(dev, &ayaneo_led_mc);
 //	if (ret)
