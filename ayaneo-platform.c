@@ -1,9 +1,13 @@
-// SPDX-License-Identifier: GPL-3.0+
+// SPDX-License-Identifier: GPL-2.0+
 /*
  * Platform driver for AYANEO x86 Handhelds that exposes RGB LED
  * control via a sysfs led_class_multicolor interface.
  *
- * Copyright (C) 2023 Derek J. Clark <derekjohn.clark@gmail.com>
+ * Copyright (C) 2023-2024 Derek J. Clark <derekjohn.clark@gmail.com>
+ * Copyright (C) 2023-2024 JELOS <https://github.com/JustEnoughLinuxOS>
+ * Copyright (C) 2024 Sebastian Kranz <https://github.com/Lightwars>
+ * Derived from original reverse engineering work by Maya Matuszczyk
+ * <https://github.com/Maccraft123/ayaled>
  */
 
 #include <linux/acpi.h>
@@ -67,8 +71,8 @@ static bool unlock_global_acpi_lock(void)
 #define AYANEO_LED_MC_R_Q4_G	0x7d
 #define AYANEO_LED_MC_R_Q4_B	0x7e
 
-#define UNCLEAR_CMD_1		0x86
-#define UNCLEAR_CMD_2		0xc6
+#define CLOSE_CMD_1		0x86
+#define CLOSE_CMD_2		0xc6
 /* Schema:
 #
 # 0x6d - LED PWM control (0x03)
@@ -101,23 +105,21 @@ static bool unlock_global_acpi_lock(void)
 */
 /* EC Controlled RGB registers */
 #define AYANEO_LED_PWM_CONTROL	0x6d
-#define AYANEO_LED_POS_COLOR	0xb1
-#define AYANEO_LED_BRIGHTNESS	0xb2
+#define AYANEO_LED_POS_COLOR	  0xb1
+#define AYANEO_LED_BRIGHTNESS	  0xb2
 #define AYANEO_LED_MODE_REG     0xbf
-
-#define AYANEO_LED_CMD_OFF	0x02
+#define AYANEO_LED_CMD_OFF	    0x02
 
 /* RGB Mode values */
-#define AYANEO_LED_MODE_WRITE             0x10 /* Default write mode */
-#define AYANEO_LED_MODE_WRITE_END         0xff /* close channel */
-
+#define AYANEO_LED_MODE_WRITE      0x10 /* Default write mode */
+#define AYANEO_LED_MODE_WRITE_END  0xff /* close channel */
 
 enum ayaneo_model {
 	air = 1,
 	air_1s,
 	air_pro,
 	air_plus,
-        air_plus_mendo,
+  air_plus_mendo,
 	geek,
 	geek_1s,
 	ayaneo_2,
@@ -200,32 +202,6 @@ static const struct dmi_system_id dmi_table[] = {
 	{},
 };
 
-/* Helper functions to handle EC read/write */
-/*
-static int read_from_ec(u8 reg, int size, long *val)
-{
-	int i;
-	int ret;
-	u8 buffer;
-
-	if (!lock_global_acpi_lock())
-		return -EBUSY;
-
-	*val = 0;
-	for (i = 0; i < size; i++) {
-		ret = ec_read(reg + i, &buffer);
-		if (ret)
-			return ret;
-		*val <<= i * 8;
-		*val += buffer;
-	}
-
-	if (!unlock_global_acpi_lock())
-		return -EBUSY;
-
-	return 0;
-}
-*/
 static int write_to_ec(u8 reg, u8 val)
 {
 	int ret;
@@ -243,32 +219,25 @@ static int write_to_ec(u8 reg, u8 val)
 
 static void probe_ec_ram_index(u8 index)
 {
-
 	outb(0x2e, AYANEO_ADDR_PORT);
-        outb(0x11, AYANEO_DATA_PORT);
-        outb(0x2f, AYANEO_ADDR_PORT);
-        outb(AYANEO_HIGH_BYTE, AYANEO_DATA_PORT);
-                                                                     
-        outb(0x2e, AYANEO_ADDR_PORT);
-        outb(0x10, AYANEO_DATA_PORT);
-        outb(0x2f, AYANEO_ADDR_PORT);
-        outb(index, AYANEO_DATA_PORT);
-                                                                     
-        outb(0x2e, AYANEO_ADDR_PORT);
-        outb(0x12, AYANEO_DATA_PORT);
-        outb(0x2f, AYANEO_ADDR_PORT);
+  outb(0x11, AYANEO_DATA_PORT);
+  outb(0x2f, AYANEO_ADDR_PORT);
+  outb(AYANEO_HIGH_BYTE, AYANEO_DATA_PORT);
+                                                               
+  outb(0x2e, AYANEO_ADDR_PORT);
+  outb(0x10, AYANEO_DATA_PORT);
+  outb(0x2f, AYANEO_ADDR_PORT);
+  outb(index, AYANEO_DATA_PORT);
+                                                               
+  outb(0x2e, AYANEO_ADDR_PORT);
+  outb(0x12, AYANEO_DATA_PORT);
+  outb(0x2f, AYANEO_ADDR_PORT);
 }
-/*
-static u8 read_ec_ram(u8 index)
-{
-	probe_ec_ram_index(index);
-	return inb(AYANEO_DATA_PORT);
-}
-*/
+
 static void write_ec_ram(u8 index, u8 val)
 {
 	probe_ec_ram_index(index);
-        outb(val, AYANEO_DATA_PORT);
+  outb(val, AYANEO_DATA_PORT);
 }
 
 static void ayaneo_led_mc_open(void)
@@ -283,9 +252,8 @@ static void ayaneo_led_mc_close(u8 index)
 
 static void ayaneo_led_mc_write(void)
 {
-	//ayaneo_led_mc_open();
 	write_ec_ram(0x70, 0x00);
-	ayaneo_led_mc_close(0x86);
+	ayaneo_led_mc_close(CLOSE_CMD_1);
 }
 
 static void ayaneo_led_mc_state(u8 state) {
@@ -297,82 +265,83 @@ static void ayaneo_led_mc_state(u8 state) {
   ayaneo_led_mc_open();
   for (zoneindex = 0; zoneindex < 2; zoneindex++) {
     write_ec_ram(zone[zoneindex], state);
-    ayaneo_led_mc_close(0xc6);
+    ayaneo_led_mc_close(CLOSE_CMD_2);
   }
   ayaneo_led_mc_write();
 }
 
 static void ayaneo_led_mc_enable(void) {
   ayaneo_led_mc_state(AYANEO_LED_MC_ON);
-    ayaneo_led_mc_open();
-    write_ec_ram(0x70, 0x0);
-  ayaneo_led_mc_close(0x86);
 
   ayaneo_led_mc_open();
-    write_ec_ram(0xb2, 0xba);
-  ayaneo_led_mc_close(0xc6);
+  write_ec_ram(0x70, 0x0);
+  ayaneo_led_mc_close(CLOSE_CMD_1);
 
   ayaneo_led_mc_open();
-    write_ec_ram(0x72, 0xba);
-  ayaneo_led_mc_close(0x86);
+  write_ec_ram(0xb2, 0xba);
+  ayaneo_led_mc_close(CLOSE_CMD_2);
+
+  ayaneo_led_mc_open();
+  write_ec_ram(0x72, 0xba);
+  ayaneo_led_mc_close(CLOSE_CMD_1);
   
   ayaneo_led_mc_write();
 
   ayaneo_led_mc_open();
-    write_ec_ram(0xbf, 0x0);
-  ayaneo_led_mc_close(0xc6);
+  write_ec_ram(0xbf, 0x0);
+  ayaneo_led_mc_close(CLOSE_CMD_2);
 
   ayaneo_led_mc_open();
-    write_ec_ram(0x7f, 0x0);
-  ayaneo_led_mc_close(0xc6);
+  write_ec_ram(0x7f, 0x0);
+  ayaneo_led_mc_close(CLOSE_CMD_2);
 
   ayaneo_led_mc_open();
-    write_ec_ram(0xc0, 0x0);
-  ayaneo_led_mc_close(0xc6);
+  write_ec_ram(0xc0, 0x0);
+  ayaneo_led_mc_close(CLOSE_CMD_2);
 
   ayaneo_led_mc_open();
-    write_ec_ram(0x80, 0x0);
-  ayaneo_led_mc_close(0x86);
+  write_ec_ram(0x80, 0x0);
+  ayaneo_led_mc_close(CLOSE_CMD_1);
 
   ayaneo_led_mc_open();
-    write_ec_ram(0xc1, 0x5);
-  ayaneo_led_mc_close(0xc6);
+  write_ec_ram(0xc1, 0x5);
+  ayaneo_led_mc_close(CLOSE_CMD_2);
 
   ayaneo_led_mc_open();
-    write_ec_ram(0x81, 0x5);
-  ayaneo_led_mc_close(0xc6);
+  write_ec_ram(0x81, 0x5);
+  ayaneo_led_mc_close(CLOSE_CMD_2);
   
   ayaneo_led_mc_open();
-    write_ec_ram(0xc2, 0x5);
-  ayaneo_led_mc_close(0xc6);
+  write_ec_ram(0xc2, 0x5);
+  ayaneo_led_mc_close(CLOSE_CMD_2);
 
   ayaneo_led_mc_open();
-    write_ec_ram(0x82, 0x5);
-  ayaneo_led_mc_close(0x86);
+  write_ec_ram(0x82, 0x5);
+  ayaneo_led_mc_close(CLOSE_CMD_1);
 
   ayaneo_led_mc_open();
-    write_ec_ram(0xc3, 0x5);
-  ayaneo_led_mc_close(0x86);
+  write_ec_ram(0xc3, 0x5);
+  ayaneo_led_mc_close(CLOSE_CMD_1);
 
   ayaneo_led_mc_open();
-    write_ec_ram(0x83, 0x5);
-  ayaneo_led_mc_close(0x86);
+  write_ec_ram(0x83, 0x5);
+  ayaneo_led_mc_close(CLOSE_CMD_1);
 
   ayaneo_led_mc_open();
-    write_ec_ram(0xc4, 0x5);
-  ayaneo_led_mc_close(0xc6);
+  write_ec_ram(0xc4, 0x5);
+  ayaneo_led_mc_close(CLOSE_CMD_2);
 
   ayaneo_led_mc_open();
-    write_ec_ram(0x84, 0x5);
-  ayaneo_led_mc_close(0x86);
+  write_ec_ram(0x84, 0x5);
+  ayaneo_led_mc_close(CLOSE_CMD_1);
 
   ayaneo_led_mc_open();
-    write_ec_ram(0xc5, 0x7);
-  ayaneo_led_mc_close(0xc6);
+  write_ec_ram(0xc5, 0x7);
+  ayaneo_led_mc_close(CLOSE_CMD_2);
 
   ayaneo_led_mc_open();
-    write_ec_ram(0x85, 0x7);
-  ayaneo_led_mc_close(0x86);
+  write_ec_ram(0x85, 0x7);
+  ayaneo_led_mc_close(CLOSE_CMD_1);
   
   ayaneo_led_mc_write();
 }
@@ -397,29 +366,29 @@ static void ayaneo_led_mc_color(u8 *color) {
 
 static void ayaneo_led_mc_set(u8 pos, u8 brightness)
 {
-        write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE);
-        write_to_ec(AYANEO_LED_POS_COLOR, pos);
-        write_to_ec(AYANEO_LED_BRIGHTNESS, brightness);
-        msleep(5);
-        write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE_END);
+  write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE);
+  write_to_ec(AYANEO_LED_POS_COLOR, pos);
+  write_to_ec(AYANEO_LED_BRIGHTNESS, brightness);
+  msleep(5);
+  write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE_END);
 }
 
 static void ayaneo_led_mc_intensity(u8 *color)
 {
-        u8 zones[4] = {2, 5, 8, 11};
-        int zone;
-
-        write_to_ec(AYANEO_LED_PWM_CONTROL, 0x03);
-        for (zone = 0; zone < 4; zone++) {
+  u8 zones[4] = {2, 5, 8, 11};
+  int zone;
+  
+  write_to_ec(AYANEO_LED_PWM_CONTROL, 0x03);
+  for (zone = 0; zone < 4; zone++) {
 		ayaneo_led_mc_set(zones[zone] + 1, color[0]);
 		ayaneo_led_mc_set(zones[zone] + 2, color[1]);
 		ayaneo_led_mc_set(zones[zone] + 3, color[2]);
-        }
+  }
 }
 
 static void ayaneo_led_mc_off(void)
 {
-        write_to_ec(AYANEO_LED_PWM_CONTROL, 0x03);
+  write_to_ec(AYANEO_LED_PWM_CONTROL, 0x03);
 	ayaneo_led_mc_set(AYANEO_LED_CMD_OFF, 0xc0); // set all leds to off
 	ayaneo_led_mc_set(AYANEO_LED_CMD_OFF, 0x80); // needed to switch leds on again
 }
@@ -437,11 +406,11 @@ static void ayaneo_led_mc_take_control(void)
 		case ayaneo_2s:
 			ayaneo_led_mc_off();
 			break;
-	        case air_plus:
-	                ayaneo_led_mc_state(AYANEO_LED_MC_OFF);
-	                break;
-	        default:
-		        break;
+	  case air_plus:
+	    ayaneo_led_mc_state(AYANEO_LED_MC_OFF);
+	    break;
+	  default:
+      break;
 	}
 }
 
@@ -449,23 +418,23 @@ static void ayaneo_led_mc_take_control(void)
 static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
                                       enum led_brightness brightness)
 {
-        struct led_classdev_mc *mc_cdev = lcdev_to_mccdev(led_cdev);
+  struct led_classdev_mc *mc_cdev = lcdev_to_mccdev(led_cdev);
 	int val;
-        int i;
+  int i;
 	struct mc_subled s_led;
-        u8 color[3];
-        
-        if (brightness < 0 || brightness > 255)
-	        return;
+  u8 color[3];
+
+  if (brightness < 0 || brightness > 255)
+	  return;
 
 	led_cdev->brightness = brightness;
 
 	for (i = 0; i < mc_cdev->num_colors; i++) {
 		s_led = mc_cdev->subled_info[i];
 		if (s_led.intensity < 0 || s_led.intensity > 255)
-	                return;
-	        val = brightness * s_led.intensity / led_cdev->max_brightness;
-	        color[s_led.channel] = val;
+      return;
+	  val = brightness * s_led.intensity / led_cdev->max_brightness;
+	  color[s_led.channel] = val;
 	}
 
 	switch (model) {
@@ -479,13 +448,12 @@ static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
 		case ayaneo_2s:
 			ayaneo_led_mc_intensity(color);
 			break;
-	        case air_plus:
-	                //ayaneo_led_mc_state(AYANEO_LED_MC_OFF);
-	                ayaneo_led_mc_color(color);
-	                ayaneo_led_mc_enable();
-	                break;
-	        default:
-		        break;
+	  case air_plus:
+	    ayaneo_led_mc_color(color);
+	    ayaneo_led_mc_enable();
+	    break;
+	  default:
+		  break;
 	}
 };
 
@@ -495,62 +463,52 @@ static enum led_brightness ayaneo_led_mc_brightness_get(struct led_classdev *led
 };
 
 struct mc_subled ayaneo_led_mc_subled_info[] = {
-        {
-                .color_index = LED_COLOR_ID_RED,
-                .brightness = 0,
-                .intensity = 0,
-                .channel = 0,
-        },
-        {
-                .color_index = LED_COLOR_ID_GREEN,
-                .brightness = 0,
-                .intensity = 0,
-                .channel = 1,
-        },
-        {
-                .color_index = LED_COLOR_ID_BLUE,
-                .brightness = 0,
-                .intensity = 0,
-                .channel = 2,
-        },
+  {
+    .color_index = LED_COLOR_ID_RED,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = 0,
+  },
+  {
+    .color_index = LED_COLOR_ID_GREEN,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = 1,
+  },
+  {
+    .color_index = LED_COLOR_ID_BLUE,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = 2,
+  },
 };
 
 struct led_classdev_mc ayaneo_led_mc = {
-        .led_cdev = {
-                .name = "multicolor:chassis",
-                .brightness = 0,
-                .max_brightness = 255,
-                .brightness_set = ayaneo_led_mc_brightness_set,
-                .brightness_get = ayaneo_led_mc_brightness_get,
-        },
-        .num_colors = ARRAY_SIZE(ayaneo_led_mc_subled_info),
-        .subled_info = ayaneo_led_mc_subled_info,
+  .led_cdev = {
+    .name = "multicolor:chassis",
+    .brightness = 0,
+    .max_brightness = 255,
+    .brightness_set = ayaneo_led_mc_brightness_set,
+    .brightness_get = ayaneo_led_mc_brightness_get,
+  },
+  .num_colors = ARRAY_SIZE(ayaneo_led_mc_subled_info),
+  .subled_info = ayaneo_led_mc_subled_info,
 };
 
 static int ayaneo_platform_probe(struct platform_device *pdev)
 {
 	struct device *dev = &pdev->dev;
-	//struct platform_device *platform_dev;
-	//struct device *hwdev;
 	const struct dmi_system_id *match;
 	int ret;
 
 	match = dmi_first_match(dmi_table);
 	ret = PTR_ERR_OR_ZERO(match);
 	if (ret)
-	        return ret;
-        model = (enum ayaneo_model)match->driver_data;
-        ayaneo_led_mc_take_control();
-        
-        ret = devm_led_classdev_multicolor_register(dev, &ayaneo_led_mc);
-//	if (ret)
-//	        return ret;
-        return ret;
-	//hwdev = devm_device_register("TODO");
-	/* register a platform device to act as the parent for LEDS, etc. */
-	//platform_dev = platform_device_register_simple("ayaneo-platform", -1, NULL, 0);
-	//hwdev = &platform_dev->dev;
-	//return PTR_ERR_OR_ZERO(hwdev);
+    return ret;
+  model = (enum ayaneo_model)match->driver_data;
+  ayaneo_led_mc_take_control();
+  ret = devm_led_classdev_multicolor_register(dev, &ayaneo_led_mc);
+  return ret;
 }
 
 static struct platform_driver ayaneo_platform_driver = {
