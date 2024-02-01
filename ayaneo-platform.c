@@ -3,7 +3,7 @@
  * Platform driver for AYANEO x86 Handhelds that exposes RGB LED
  * control via a sysfs led_class_multicolor interface.
  *
- * Copyright (C) 2023 Derek J. Clark <derekjohn.clark@gmail.com>
+ * Copyright (C) 2023-2024 Derek J. Clark <derekjohn.clark@gmail.com>
  */
 
 #include <linux/acpi.h>
@@ -71,13 +71,14 @@ static bool unlock_global_acpi_lock(void)
 
 enum ayaneo_model {
 	air = 1,
-	air_1s
-	air_pro,
+	air_1s,
 	air_plus,
-	geek,
-	geek_1s,
+	air_pro,
 	ayaneo_2,
 	ayaneo_2s,
+	geek,
+	geek_1s,
+  kun,
 };
 
 static enum ayaneo_model model;
@@ -85,10 +86,66 @@ static enum ayaneo_model model;
 static const struct dmi_system_id dmi_table[] = {
 	{
 		.matches = {
-			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, ""),
-			DMI_EXACT_MATCH(DMI_BOARD_NAME, ""),
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AIR"),
 		},
 		.driver_data = (void *)air,
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AIR 1S"),
+		},
+		.driver_data = (void *)air_1s,
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AIR Plus"),
+		},
+		.driver_data = (void *)air_plus,
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AIR Pro"),
+		},
+		.driver_data = (void *)air_pro,
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AYANEO 2"),
+		},
+		.driver_data = (void *)ayaneo_2,
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "AYANEO 2S"),
+		},
+		.driver_data = (void *)ayaneo_2s,
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "GEEK"),
+		},
+		.driver_data = (void *)geek,
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "GEEK 1S"),
+		},
+		.driver_data = (void *)geek_1s,
+	},
+	{
+		.matches = {
+			DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+			DMI_EXACT_MATCH(DMI_BOARD_NAME, "KUN"),
+		},
+		.driver_data = (void *)kun,
 	},
 	{},
 };
@@ -135,20 +192,19 @@ static int write_to_ec(u8 reg, u8 val)
 
 static void probe_ec_ram_index(u8 index)
 {
+  outb(0x2e, AYANEO_ADDR_PORT);
+  outb(0x11, AYANEO_DATA_PORT);
+  outb(0x2f, AYANEO_ADDR_PORT);
+  outb(AYANEO_HIGH_BYTE, AYANEO_DATA_PORT);
 
-	outb(0x2e, AYANEO_ADDR_PORT);
-        outb(0x11, AYANEO_DATA_PORT);
-        outb(0x2f, AYANEO_ADDR_PORT);
-        outb(AYANEO_HIGH_BYTE, AYANEO_DATA_PORT);
-                                                                     
-        outb(0x2e, AYANEO_ADDR_PORT);
-        outb(0x10, AYANEO_DATA_PORT);
-        outb(0x2f, AYANEO_ADDR_PORT);
-        outb(index, AYANEO_DATA_PORT);
-                                                                     
-        outb(0x2e, AYANEO_ADDR_PORT);
-        outb(0x12, AYANEO_DATA_PORT);
-        outb(0x2f, AYANEO_ADDR_PORT);
+  outb(0x2e, AYANEO_ADDR_PORT);
+  outb(0x10, AYANEO_DATA_PORT);
+  outb(0x2f, AYANEO_ADDR_PORT);
+  outb(index, AYANEO_DATA_PORT);
+
+  outb(0x2e, AYANEO_ADDR_PORT);
+  outb(0x12, AYANEO_DATA_PORT);
+  outb(0x2f, AYANEO_ADDR_PORT);
 }
 
 static u8 read_ec_ram(u8 index)
@@ -160,7 +216,8 @@ static u8 read_ec_ram(u8 index)
 static void write_ec_ram(u8 index, u8 val)
 {
 	probe_ec_ram_index(index);
-        outb(val, AYANEO_DATA_PORT);
+  outb(val, AYANEO_DATA_PORT);
+  ayaneo_led_mc_close(index);
 }
 
 static void ayaneo_led_mc_open()
@@ -182,8 +239,21 @@ static void ayaneo_led_mc_write()
 
 /* RGB LED Logic */
 static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
-                                      enum led_brightness brightness)
-{
+                                         enum led_brightness brightness) {
+  struct led_classdev_mc *mc_cdev = lcdev_to_mccdev(led_cdev);
+  int i;
+	int val;
+	struct mc_subled s_led;
+
+	led_cdev->brightness = brightness;
+
+	for (i = 0; i < mc_cdev->num_colors; i++) {
+		s_led = mc_cdev->subled_info[i];
+		val = brightness * s_led.intensity / led_cdev->max_brightness;
+		write_ec_ram(s_led.channel, val);
+	}
+
+	retval = write_to_ec(AYN_LED_MODE_REG, AYN_LED_MODE_WRITE);
 };
 
 static enum led_brightness ayaneo_led_mc_brightness_get(struct led_classdev *led_cdev)
@@ -197,51 +267,183 @@ static struct attribute *ayaneo_led_mc_attrs[] = {
 };
 
 struct mc_subled ayaneo_led_mc_subled_info[] = {
-        {
-                .color_index = LED_COLOR_ID_RED,
-                .brightness = 0,
-                .intensity = 0,
-                .channel = AYN_LED_MC_R_REG,
-        },
-        {
-                .color_index = LED_COLOR_ID_GREEN,
-                .brightness = 0,
-                .intensity = 0,
-                .channel = AYN_LED_MC_B_REG,
-        },
-        {
-                .color_index = LED_COLOR_ID_BLUE,
-                .brightness = 0,
-                .intensity = 0,
-                .channel = AYN_LED_MC_G_REG,
-        },
+  {
+    .color_index = LED_LEFT_QUAD1_COLOR_ID_RED,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_L_Q1_R,
+  },
+  {
+    .color_index = LED_LEFT_QUAD1_COLOR_ID_GREEN,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_L_Q1_G,
+  },
+  {
+    .color_index = LED_LEFT_QUAD1_COLOR_ID_BLUE,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_L_Q1_B,
+  },
+  {
+    .color_index = LED_LEFT_QUAD2_COLOR_ID_RED,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_L_Q2_R,
+  },
+  {
+    .color_index = LED_LEFT_QUAD2_COLOR_ID_GREEN,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_L_Q2_G,
+  },
+  {
+    .color_index = LED_LEFT_QUAD2_COLOR_ID_BLUE,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_L_Q2_B,
+  },
+  {
+    .color_index = LED_LEFT_QUAD3_COLOR_ID_RED,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_L_Q3_R,
+  },
+  {
+    .color_index = LED_LEFT_QUAD3_COLOR_ID_GREEN,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_L_Q3_G,
+  },
+  {
+    .color_index = LED_LEFT_QUAD3_COLOR_ID_BLUE,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_L_Q3_B,
+  },
+  {
+    .color_index = LED_LEFT_QUAD4_COLOR_ID_RED,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_L_Q4_R,
+  },
+  {
+    .color_index = LED_LEFT_QUAD4_COLOR_ID_GREEN,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_L_Q4_G,
+  },
+  {
+    .color_index = LED_LEFT_QUAD4_COLOR_ID_BLUE,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_L_Q4_B,
+  },
+  {
+    .color_index = LED_RIGHT_QUAD1_COLOR_ID_RED,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_R_Q1_R,
+  },
+  {
+    .color_index = LED_RIGHT_QUAD1_COLOR_ID_GREEN,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_R_Q1_G,
+  },
+  {
+    .color_index = LED_RIGHT_QUAD1_COLOR_ID_BLUE,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_R_Q1_B,
+  },
+  {
+    .color_index = LED_RIGHT_QUAD2_COLOR_ID_RED,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_R_Q2_R,
+  },
+  {
+    .color_index = LED_RIGHT_QUAD2_COLOR_ID_GREEN,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_R_Q2_G,
+  },
+  {
+    .color_index = LED_RIGHT_QUAD2_COLOR_ID_BLUE,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_R_Q2_B,
+  },
+  {
+    .color_index = LED_RIGHT_QUAD3_COLOR_ID_RED,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_R_Q3_R,
+  },
+  {
+    .color_index = LED_RIGHT_QUAD3_COLOR_ID_GREEN,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_R_Q3_G,
+  },
+  {
+    .color_index = LED_RIGHT_QUAD3_COLOR_ID_BLUE,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_R_Q3_B,
+  },
+  {
+    .color_index = LED_RIGHT_QUAD4_COLOR_ID_RED,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_R_Q4_R,
+  },
+  {
+    .color_index = LED_RIGHT_QUAD4_COLOR_ID_GREEN,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_R_Q4_G,
+  },
+  {
+    .color_index = LED_RIGHT_QUAD4_COLOR_ID_BLUE,
+    .brightness = 0,
+    .intensity = 0,
+    .channel = AYANEO_LED_MC_R_Q4_B,
+  },
 };
 
 struct led_classdev_mc ayaneo_led_mc = {
-        .led_cdev = {
-                .name = "multicolor:chassis",
-                .brightness = 0,
-                .max_brightness = 255,
-                .brightness_set = ayaneo_led_mc_brightness_set,
-                .brightness_get = ayaneo_led_mc_brightness_get,
-        },
-        .num_colors = ARRAY_SIZE(ayaneo_led_mc_subled_info),
-        .subled_info = ayaneo_led_mc_subled_info,
+  .led_cdev = {
+    .name = "multicolor:chassis",
+    .brightness = 0,
+    .max_brightness = 255,
+    .brightness_set = ayaneo_led_mc_brightness_set,
+    .brightness_get = ayaneo_led_mc_brightness_get,
+  },
+  .num_colors = ARRAY_SIZE(ayaneo_led_mc_subled_info),
+  .subled_info = ayaneo_led_mc_subled_info,
 };
 
-static int ayaneo_platform_probe(struct platform_device *pdev)
-{
+static int ayaneo_platform_probe(struct platform_device *pdev)< {
 	struct device *dev = &pdev->dev;
-	struct device *hwdev;
 	int ret;
+  ret = devm_led_classdev_multicolor_register(dev, &ayaneo_led_mc);
+  
+  struct led_classdev_mc *mc_cdev = &ayaneo_led_mc);
+  int i;
+	int val;
+	struct mc_subled s_led;
 
-        ret = devm_led_classdev_multicolor_register(dev, &ayaneo_led_mc);
-	if (ret)
-		return ret;
+	led_cdev->brightness = brightness;
 
-	hwdev = devm_device_register("TODO")
-	return PTR_ERR_OR_ZERO(hwdev);
-}
+	for (i = 0; i < mc_cdev->num_colors; i++) {
+		s_led = mc_cdev->subled_info[i];
+		val = brightness * s_led.intensity / led_cdev->max_brightness;
+	}
+
+	return ret;
+};
 
 static struct platform_driver ayaneo_platform_driver = {
 	.driver = {
