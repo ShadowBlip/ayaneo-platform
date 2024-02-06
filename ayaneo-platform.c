@@ -368,7 +368,7 @@ static void ayaneo_led_mc_set(u8 pos, u8 brightness)
   write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE);
   write_to_ec(AYANEO_LED_POS_COLOR, pos);
   write_to_ec(AYANEO_LED_BRIGHTNESS, brightness);
-  //msleep(5);
+  msleep(1);
   write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE_END);
 }
 
