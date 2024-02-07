@@ -46,6 +46,7 @@ static bool unlock_global_acpi_lock(void)
 
 
 /* RGB LED EC Ram Registers */
+/*
 #define AYANEO_LED_MC_L_Q1_R	0xb3
 #define AYANEO_LED_MC_L_Q1_G	0xb4
 #define AYANEO_LED_MC_L_Q1_B	0xb5
@@ -70,7 +71,7 @@ static bool unlock_global_acpi_lock(void)
 #define AYANEO_LED_MC_R_Q4_R	0x7c
 #define AYANEO_LED_MC_R_Q4_G	0x7d
 #define AYANEO_LED_MC_R_Q4_B	0x7e
-
+*/
 #define CLOSE_CMD_1		0x86
 #define CLOSE_CMD_2		0xc6
 /* Schema:
@@ -115,15 +116,15 @@ static bool unlock_global_acpi_lock(void)
 #define AYANEO_LED_MODE_WRITE_END  0xff /* close channel */
 
 enum ayaneo_model {
-	air = 1,
-	air_1s,
-	air_pro,
-	air_plus,
+  air = 1,
+  air_1s,
+  air_pro,
+  air_plus,
   air_plus_mendo,
-	geek,
-	geek_1s,
-	ayaneo_2,
-	ayaneo_2s,
+  geek,
+  geek_1s,
+  ayaneo_2,
+  ayaneo_2s,
 };
 
 static enum ayaneo_model model;
@@ -217,7 +218,7 @@ static int write_to_ec(u8 reg, u8 val)
 	return ret;
 }
 
-static void probe_ec_ram_index(u8 index)
+static void write_ec_ram(u8 index, u8 val)
 {
 	outb(0x2e, AYANEO_ADDR_PORT);
   outb(0x11, AYANEO_DATA_PORT);
@@ -232,14 +233,10 @@ static void probe_ec_ram_index(u8 index)
   outb(0x2e, AYANEO_ADDR_PORT);
   outb(0x12, AYANEO_DATA_PORT);
   outb(0x2f, AYANEO_ADDR_PORT);
-}
-
-static void write_ec_ram(u8 index, u8 val)
-{
-	probe_ec_ram_index(index);
   outb(val, AYANEO_DATA_PORT);
 }
 
+/* Newer AIR Plus methods */
 static void ayaneo_led_mc_open(void)
 {
 	write_ec_ram(0x87, 0xa5);
@@ -270,6 +267,7 @@ static void ayaneo_led_mc_state(u8 state) {
   ayaneo_led_mc_write();
 }
 
+/* Open every LED register as write enabled */
 static void ayaneo_led_mc_enable(void) {
   ayaneo_led_mc_state(AYANEO_LED_MC_ON);
 
@@ -364,13 +362,12 @@ static void ayaneo_led_mc_color(u8 *color) {
   ayaneo_led_mc_write(); 
 }
 
+/* Legacy methods */
 static void ayaneo_led_mc_set(u8 pos, u8 brightness)
 {
-  write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE);
   write_to_ec(AYANEO_LED_POS_COLOR, pos);
   write_to_ec(AYANEO_LED_BRIGHTNESS, brightness);
-  msleep(5);
-  write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE_END);
+  mdelay(1);
 }
 
 static void ayaneo_led_mc_intensity(u8 *color)
@@ -379,11 +376,13 @@ static void ayaneo_led_mc_intensity(u8 *color)
   int zone;
   
   write_to_ec(AYANEO_LED_PWM_CONTROL, 0x03);
+  write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE);
   for (zone = 0; zone < 4; zone++) {
 		ayaneo_led_mc_set(zones[zone] + 1, color[0]);
 		ayaneo_led_mc_set(zones[zone] + 2, color[1]);
 		ayaneo_led_mc_set(zones[zone] + 3, color[2]);
   }
+  write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE_END);
 }
 
 static void ayaneo_led_mc_off(void)
