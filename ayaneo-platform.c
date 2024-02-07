@@ -366,9 +366,11 @@ static void ayaneo_led_mc_color(u8 *color)
 /* Legacy methods */
 static void ayaneo_led_mc_set(u8 pos, u8 brightness)
 {
+	write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE);
 	write_to_ec(AYANEO_LED_POS_COLOR, pos);
 	write_to_ec(AYANEO_LED_BRIGHTNESS, brightness);
 	mdelay(1);
+	write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE_END);
 }
 
 static void ayaneo_led_mc_intensity(u8 *color)
@@ -377,13 +379,11 @@ static void ayaneo_led_mc_intensity(u8 *color)
 	int zone;
   
 	write_to_ec(AYANEO_LED_PWM_CONTROL, 0x03);
-	write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE);
 	for (zone = 0; zone < 4; zone++) {
 		ayaneo_led_mc_set(zones[zone] + 1, color[0]);
 		ayaneo_led_mc_set(zones[zone] + 2, color[1]);
 		ayaneo_led_mc_set(zones[zone] + 3, color[2]);
 	}
-	write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE_END);
 }
 
 static void ayaneo_led_mc_off(void)
