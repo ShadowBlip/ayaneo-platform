@@ -106,7 +106,7 @@ static bool unlock_global_acpi_lock(void)
 */
 /* EC Controlled RGB registers */
 #define AYANEO_LED_PWM_CONTROL      0x6d
-#define AYANEO_LED_POS_COLOR        0xb1
+#define AYANEO_LED_POS              0xb1
 #define AYANEO_LED_BRIGHTNESS       0xb2
 #define AYANEO_LED_MODE_REG         0xbf
 #define AYANEO_LED_CMD_OFF          0x02
@@ -118,13 +118,14 @@ static bool unlock_global_acpi_lock(void)
 enum ayaneo_model {
         air = 1,
         air_1s,
-        air_pro,
         air_plus,
         air_plus_mendo,
-        geek,
-        geek_1s,
+        air_pro,
         ayaneo_2,
         ayaneo_2s,
+        geek,
+        geek_1s,
+        kun,
 };
 
 static enum ayaneo_model model;
@@ -154,13 +155,6 @@ static const struct dmi_system_id dmi_table[] = {
         {
                 .matches = {
                         DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
-                        DMI_EXACT_MATCH(DMI_BOARD_NAME, "AIR Pro"),
-                },
-                .driver_data = (void *)air_pro,
-        },
-        {
-                .matches = {
-                        DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
                         DMI_EXACT_MATCH(DMI_BOARD_NAME, "AB05-AMD"),
                 },
                 .driver_data = (void *)air_plus,
@@ -171,6 +165,27 @@ static const struct dmi_system_id dmi_table[] = {
                         DMI_EXACT_MATCH(DMI_BOARD_NAME, "AB05-Mendocino"),
                 },
                 .driver_data = (void *)air_plus_mendo,
+        },
+        {
+                .matches = {
+                        DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+                        DMI_EXACT_MATCH(DMI_BOARD_NAME, "AIR Pro"),
+                },
+                .driver_data = (void *)air_pro,
+        },
+        {
+                .matches = {
+                        DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+                        DMI_EXACT_MATCH(DMI_BOARD_NAME, "AYANEO 2"),
+                },
+                .driver_data = (void *)ayaneo_2,
+        },
+        {
+                .matches = {
+                        DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+                        DMI_EXACT_MATCH(DMI_BOARD_NAME, "AYANEO 2S"),
+                },
+                .driver_data = (void *)ayaneo_2s,
         },
         {
                 .matches = {
@@ -189,16 +204,9 @@ static const struct dmi_system_id dmi_table[] = {
         {
                 .matches = {
                         DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
-                        DMI_EXACT_MATCH(DMI_BOARD_NAME, "AYANEO 2"),
+                        DMI_EXACT_MATCH(DMI_BOARD_NAME, "AYANEO KUN"),
                 },
-                .driver_data = (void *)ayaneo_2,
-        },
-        {
-                .matches = {
-                        DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
-                        DMI_EXACT_MATCH(DMI_BOARD_NAME, "AYANEO 2S"),
-                },
-                .driver_data = (void *)ayaneo_2s,
+                .driver_data = (void *)kun,
         },
         {},
 };
@@ -234,7 +242,7 @@ static void write_ec_ram(u8 index, u8 val)
         outb(val, AYANEO_DATA_PORT);
 }
 
-/* Newer AIR Plus methods */
+/* AIR Plus methods */
 static void ayaneo_led_mc_open(void)
 {
         write_ec_ram(0x87, 0xa5);
@@ -267,7 +275,7 @@ static void ayaneo_led_mc_state(u8 state)
 }
 
 /* Open every LED register as write enabled */
-static void ayaneo_led_mc_enable(void)
+static void ayaneo_led_mc_apply(void)
 {
         ayaneo_led_mc_state(AYANEO_LED_MC_ON);
 
@@ -283,8 +291,6 @@ static void ayaneo_led_mc_enable(void)
         write_ec_ram(0x72, 0xba);
         ayaneo_led_mc_close(CLOSE_CMD_1);
   
-        ayaneo_led_mc_write();
-
         ayaneo_led_mc_open();
         write_ec_ram(0xbf, 0x0);
         ayaneo_led_mc_close(CLOSE_CMD_2);
@@ -367,28 +373,27 @@ static void ayaneo_led_mc_color(u8 *color)
 static void ayaneo_led_mc_set(u8 pos, u8 brightness)
 {
         write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE);
-        write_to_ec(AYANEO_LED_POS_COLOR, pos);
+        write_to_ec(AYANEO_LED_POS, pos);
         write_to_ec(AYANEO_LED_BRIGHTNESS, brightness);
         mdelay(1);
         write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE_END);
 }
 
-static void ayaneo_led_mc_intensity(u8 *color)
+static void ayaneo_led_mc_intensity(u8 *color, u8 group, u8 zones[])
 {
-        u8 zones[4] = {2, 5, 8, 11};
         int zone;
   
-        write_to_ec(AYANEO_LED_PWM_CONTROL, 0x03);
+        write_to_ec(AYANEO_LED_PWM_CONTROL, group);
         for (zone = 0; zone < 4; zone++) {
-                ayaneo_led_mc_set(zones[zone] + 1, color[0]);
-                ayaneo_led_mc_set(zones[zone] + 2, color[1]);
-                ayaneo_led_mc_set(zones[zone] + 3, color[2]);
+                ayaneo_led_mc_set(zones[zone], color[0]);
+                ayaneo_led_mc_set(zones[zone] + 1, color[1]);
+                ayaneo_led_mc_set(zones[zone] + 2, color[2]);
         }
 }
 
-static void ayaneo_led_mc_off(void)
+static void ayaneo_led_mc_off(u8 group)
 {
-        write_to_ec(AYANEO_LED_PWM_CONTROL, 0x03);
+        write_to_ec(AYANEO_LED_PWM_CONTROL, group);
         ayaneo_led_mc_set(AYANEO_LED_CMD_OFF, 0xc0); // set all leds to off
         ayaneo_led_mc_set(AYANEO_LED_CMD_OFF, 0x80); // needed to switch leds on again
 }
@@ -404,13 +409,17 @@ static void ayaneo_led_mc_take_control(void)
                 case geek_1s:
                 case ayaneo_2:
                 case ayaneo_2s:
-                        ayaneo_led_mc_off();
+                        ayaneo_led_mc_off(0x03);
                         break;
                 case air_plus:
                         ayaneo_led_mc_state(AYANEO_LED_MC_OFF);
                         break;
+                case kun:
+                        ayaneo_led_mc_off(0x03);
+                        ayaneo_led_mc_off(0x04);
+                        break;
                 default:
-                break;
+                        break;
                 }
 }
 
@@ -446,11 +455,18 @@ static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
                 case geek_1s:
                 case ayaneo_2:
                 case ayaneo_2s:
-                        ayaneo_led_mc_intensity(color);
+                        u8 zones[4] = {3, 6, 9, 12};
+                        ayaneo_led_mc_intensity(color, 0x03, zones);
                         break;
                 case air_plus:
                         ayaneo_led_mc_color(color);
-                        ayaneo_led_mc_enable();
+                        ayaneo_led_mc_apply();
+                        break;
+                case kun:
+                        u8 button_zone[1] = {12};
+                        ayaneo_led_mc_intensity(color, 0x04, button_zone);
+                        u8 joystick_zones[4] = {3, 6, 9, 12};
+                        ayaneo_led_mc_intensity(color, 0x03, joystick_zones);
                         break;
                 default:
                         break;
