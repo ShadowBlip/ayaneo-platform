@@ -483,10 +483,7 @@ static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
                         ayaneo_led_mc_apply();
                         break;
                 case kun:
-                        u8 button_zone[1] = {12};
-                        ayaneo_led_mc_intensity(color, 0x04, button_zone);
-                        u8 joystick_zones[4] = {3, 6, 9, 12};
-                        ayaneo_led_mc_intensity(color, 0x03, joystick_zones);
+                        ayaneo_led_mc_intensity_kun(color);
                         break;
                 default:
                         break;
