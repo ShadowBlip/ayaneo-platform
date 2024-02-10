@@ -209,7 +209,7 @@ static const struct dmi_system_id dmi_table[] = {
                 },
                 .driver_data = (void *)kun,
         },
-        {
+	{
                 .matches = {
                         DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
                         DMI_EXACT_MATCH(DMI_BOARD_NAME, "AS01"),
@@ -308,7 +308,7 @@ static void ayaneo_led_mc_apply(void)
         ayaneo_led_mc_open();
         write_ec_ram(0x72, 0xba);
         ayaneo_led_mc_close(CLOSE_CMD_1);
-  
+
         ayaneo_led_mc_open();
         write_ec_ram(0xbf, 0x0);
         ayaneo_led_mc_close(CLOSE_CMD_2);
@@ -409,25 +409,6 @@ static void ayaneo_led_mc_intensity(u8 *color, u8 group, u8 zones[])
         }
 }
 
-/* KUN doesn't use consistant zone mapping for RGB, adjust */
-static void ayaneo_led_mc_intensity_kun(u8 *color)
-{
-        u8 zone_0 = {3};
-        u8 zone_0_color[3] = {color[1], color[0], color[2]};
-        ayaneo_led_mc_intensity(zone_0_color, 0x03, &zone_0);
-        u8 zone_1 = {6};
-        u8 zone_1_color[3] = {color[1], color[2], color[0]};
-        ayaneo_led_mc_intensity(zone_1_color, 0x03, &zone_1);
-        u8 zone_2 = {9};
-        u8 zone_2_color[3] = {color[2], color[0], color[1]};
-        ayaneo_led_mc_intensity(zone_2_color, 0x03, &zone_2);
-        u8 zone_3 = {12};
-        u8 zone_3_color[3] = {color[2], color[1], color[0]};
-        ayaneo_led_mc_intensity(zone_3_color, 0x03, &zone_3);
-        u8 button_color[3] = {color[2], color[0], color[1]};
-        ayaneo_led_mc_intensity(button_color, 0x04, &zone_3);
-}
-
 static void ayaneo_led_mc_off(u8 group)
 {
         write_to_ec(AYANEO_LED_PWM_CONTROL, group);
@@ -502,7 +483,10 @@ static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
                         ayaneo_led_mc_apply();
                         break;
                 case kun:
-                        ayaneo_led_mc_intensity_kun(color);
+                        u8 button_zone[1] = {12};
+                        ayaneo_led_mc_intensity(color, 0x04, button_zone);
+                        u8 joystick_zones[4] = {3, 6, 9, 12};
+                        ayaneo_led_mc_intensity(color, 0x03, joystick_zones);
                         break;
                 default:
                         break;
