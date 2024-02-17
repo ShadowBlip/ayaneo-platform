@@ -218,8 +218,13 @@ static int write_to_ec(u8 reg, u8 val)
         return ret;
 }
 
-static void write_ec_ram(u8 index, u8 val)
+static int write_ec_ram(u8 index, u8 val)
 {
+        int ret;
+
+        if (!lock_global_acpi_lock())
+                return -EBUSY;
+
         outb(0x2e, AYANEO_ADDR_PORT);
         outb(0x11, AYANEO_DATA_PORT);
         outb(0x2f, AYANEO_ADDR_PORT);
@@ -232,6 +237,11 @@ static void write_ec_ram(u8 index, u8 val)
         outb(0x12, AYANEO_DATA_PORT);
         outb(0x2f, AYANEO_ADDR_PORT);
         outb(val, AYANEO_DATA_PORT);
+
+        if (!unlock_global_acpi_lock())
+                return -EBUSY;
+
+        return ret;
 }
 
 /* Newer AIR Plus methods */
