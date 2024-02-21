@@ -125,6 +125,7 @@ enum ayaneo_model {
         geek_1s,
         ayaneo_2,
         ayaneo_2s,
+        slide,
 };
 
 static enum ayaneo_model model;
@@ -199,6 +200,13 @@ static const struct dmi_system_id dmi_table[] = {
                         DMI_EXACT_MATCH(DMI_BOARD_NAME, "AYANEO 2S"),
                 },
                 .driver_data = (void *)ayaneo_2s,
+        },
+        {
+                .matches = {
+                        DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
+                        DMI_EXACT_MATCH(DMI_BOARD_NAME, "AS01"),
+                },
+                .driver_data = (void *)slide,
         },
         {},
 };
@@ -417,6 +425,7 @@ static void ayaneo_led_mc_take_control(void)
                         ayaneo_led_mc_off();
                         break;
                 case air_plus:
+                case slide:
                         ayaneo_led_mc_state(AYANEO_LED_MC_OFF);
                         break;
                 default:
@@ -459,6 +468,7 @@ static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
                         ayaneo_led_mc_intensity(color);
                         break;
                 case air_plus:
+                case slide:
                         ayaneo_led_mc_color(color);
                         ayaneo_led_mc_enable();
                         break;
