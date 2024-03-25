@@ -391,7 +391,7 @@ static void ayaneo_led_mc_set(u8 group, u8 pos, u8 brightness)
         if (!unlock_global_acpi_lock())
                 return;
 
-        mdelay(5);
+        mdelay(2);
 
         if (!lock_global_acpi_lock())
                 return;
