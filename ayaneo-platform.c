@@ -6,6 +6,7 @@
  * Copyright (C) 2023-2024 Derek J. Clark <derekjohn.clark@gmail.com>
  * Copyright (C) 2023-2024 JELOS <https://github.com/JustEnoughLinuxOS>
  * Copyright (C) 2024 Sebastian Kranz <https://github.com/Lightwars>
+ * Copyright (C) 2024 SytheZN <https://github.com/SytheZN>
  * Derived from original reverse engineering work by Maya Matuszczyk
  * <https://github.com/Maccraft123/ayaled>
  */
@@ -72,8 +73,10 @@ static bool unlock_global_acpi_lock(void)
 #define AYANEO_LED_MC_R_Q4_G     0x7d
 #define AYANEO_LED_MC_R_Q4_B     0x7e
 */
+
 #define CLOSE_CMD_1              0x86
 #define CLOSE_CMD_2              0xc6
+
 /* Schema:
 #
 # 0x6d - LED PWM control (0x03)
@@ -104,6 +107,7 @@ static bool unlock_global_acpi_lock(void)
 #
 #   0xff - Close channel
 */
+
 /* EC Controlled RGB registers */
 #define AYANEO_LED_PWM_CONTROL      0x6d
 #define AYANEO_LED_POS              0xb1
@@ -113,7 +117,8 @@ static bool unlock_global_acpi_lock(void)
 
 /* RGB Mode values */
 #define AYANEO_LED_MODE_WRITE       0x10 /* Default write mode */
-#define AYANEO_LED_MODE_WRITE_END   0xff /* close channel */
+#define AYANEO_LED_MODE_HOLD        0xfe /* close channel, hold control */
+#define AYANEO_LED_MODE_RELEASE     0xff /* close channel, release control */
 
 enum ayaneo_model {
         air = 1,
@@ -219,21 +224,6 @@ static const struct dmi_system_id dmi_table[] = {
         {},
 };
 
-static int write_to_ec(u8 reg, u8 val)
-{
-        int ret;
-
-        if (!lock_global_acpi_lock())
-                return -EBUSY;
-
-        ret = ec_write(reg, val);
-
-        if (!unlock_global_acpi_lock())
-                return -EBUSY;
-
-        return ret;
-}
-
 static int write_ec_ram(u8 index, u8 val)
 {
         int ret;
@@ -283,7 +273,7 @@ static void ayaneo_led_mc_state(u8 state)
         // 0x37 = on
         u8 zone[2] = {0xb2, 0x72};
         u8 zoneindex;
-  
+
         ayaneo_led_mc_open();
         for (zoneindex = 0; zoneindex < 2; zoneindex++) {
                 write_ec_ram(zone[zoneindex], state);
@@ -332,7 +322,7 @@ static void ayaneo_led_mc_apply(void)
         ayaneo_led_mc_open();
         write_ec_ram(0x81, 0x5);
         ayaneo_led_mc_close(CLOSE_CMD_2);
-  
+
         ayaneo_led_mc_open();
         write_ec_ram(0xc2, 0x5);
         ayaneo_led_mc_close(CLOSE_CMD_2);
@@ -364,21 +354,21 @@ static void ayaneo_led_mc_apply(void)
         ayaneo_led_mc_open();
         write_ec_ram(0x85, 0x7);
         ayaneo_led_mc_close(CLOSE_CMD_1);
-  
+
         ayaneo_led_mc_write();
 }
 
 static void ayaneo_led_mc_color(u8 *color)
 {
         u8 quadrant;
-  
+
         // Zone 1 (Left Stick)
         ayaneo_led_mc_open();
         for(quadrant = 0; quadrant < 12; quadrant++) {
                 write_ec_ram(0xB3 + quadrant, color[quadrant % 3]); // Quadrant 1
         }
         ayaneo_led_mc_write();
-  
+
         // Zone 2 (Right Stick)
         ayaneo_led_mc_open();
         for(quadrant = 0; quadrant < 12; quadrant++) {
@@ -388,24 +378,38 @@ static void ayaneo_led_mc_color(u8 *color)
 }
 
 /* Legacy methods */
-static void ayaneo_led_mc_set(u8 pos, u8 brightness)
+static void ayaneo_led_mc_set(u8 group, u8 pos, u8 brightness)
 {
-        write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE);
-        write_to_ec(AYANEO_LED_POS, pos);
-        write_to_ec(AYANEO_LED_BRIGHTNESS, brightness);
-        mdelay(1);
-        write_to_ec(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE_END);
+        if (!lock_global_acpi_lock())
+                return;
+
+        ec_write(AYANEO_LED_PWM_CONTROL, group);
+        ec_write(AYANEO_LED_POS, pos);
+        ec_write(AYANEO_LED_BRIGHTNESS, brightness);
+        ec_write(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_WRITE);
+
+        if (!unlock_global_acpi_lock())
+                return;
+
+        mdelay(2);
+
+        if (!lock_global_acpi_lock())
+                return;
+
+        ec_write(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_HOLD);
+
+        if (!unlock_global_acpi_lock())
+                return;
 }
 
 static void ayaneo_led_mc_intensity(u8 *color, u8 group, u8 zones[])
 {
         int zone;
-  
-        write_to_ec(AYANEO_LED_PWM_CONTROL, group);
+
         for (zone = 0; zone < 4; zone++) {
-                ayaneo_led_mc_set(zones[zone], color[0]);
-                ayaneo_led_mc_set(zones[zone] + 1, color[1]);
-                ayaneo_led_mc_set(zones[zone] + 2, color[2]);
+                ayaneo_led_mc_set(group, zones[zone], color[0]);
+                ayaneo_led_mc_set(group, zones[zone] + 1, color[1]);
+                ayaneo_led_mc_set(group, zones[zone] + 2, color[2]);
         }
 }
 
@@ -430,9 +434,8 @@ static void ayaneo_led_mc_intensity_kun(u8 *color)
 
 static void ayaneo_led_mc_off(u8 group)
 {
-        write_to_ec(AYANEO_LED_PWM_CONTROL, group);
-        ayaneo_led_mc_set(AYANEO_LED_CMD_OFF, 0xc0); // set all leds to off
-        ayaneo_led_mc_set(AYANEO_LED_CMD_OFF, 0x80); // needed to switch leds on again
+        ayaneo_led_mc_set(group, AYANEO_LED_CMD_OFF, 0xc0); // set all leds to off
+        ayaneo_led_mc_set(group, AYANEO_LED_CMD_OFF, 0x80); // needed to switch leds on again
 }
 
 static void ayaneo_led_mc_take_control(void)
