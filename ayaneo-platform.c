@@ -12,6 +12,7 @@
  */
 
 #include <linux/acpi.h>
+#include <linux/delay.h>
 #include <linux/dmi.h>
 #include <linux/init.h>
 #include <linux/io.h>
@@ -19,9 +20,9 @@
 #include <linux/led-class-multicolor.h>
 #include <linux/leds.h>
 #include <linux/module.h>
+#include <linux/pm.h>
 #include <linux/platform_device.h>
 #include <linux/processor.h>
-#include <linux/delay.h>
 
 /* Handle ACPI lock mechanism */
 static u32 ayaneo_mutex;
@@ -116,9 +117,9 @@ static bool unlock_global_acpi_lock(void)
 #define AYANEO_LED_CMD_OFF          0x02
 
 /* RGB Mode values */
+#define AYANEO_LED_MODE_RELEASE     0x00 /* close channel, release control */
 #define AYANEO_LED_MODE_WRITE       0x10 /* Default write mode */
 #define AYANEO_LED_MODE_HOLD        0xfe /* close channel, hold control */
-#define AYANEO_LED_MODE_RELEASE     0xff /* close channel, release control */
 
 enum ayaneo_model {
         air = 1,
@@ -135,6 +136,20 @@ enum ayaneo_model {
 };
 
 static enum ayaneo_model model;
+
+enum AYANEO_LED_SUSPEND_MODE {
+        AYANEO_LED_SUSPEND_MODE_OEM,
+        AYANEO_LED_SUSPEND_MODE_KEEP,
+        AYANEO_LED_SUSPEND_MODE_OFF
+};
+
+static const char * const AYANEO_LED_SUSPEND_MODE_TEXT[] = {
+        [AYANEO_LED_SUSPEND_MODE_OEM] = "oem",
+        [AYANEO_LED_SUSPEND_MODE_KEEP] ="keep",
+        [AYANEO_LED_SUSPEND_MODE_OFF] = "off"
+};
+
+static enum AYANEO_LED_SUSPEND_MODE suspend_mode;
 
 static const struct dmi_system_id dmi_table[] = {
         {
@@ -254,6 +269,11 @@ static int write_ec_ram(u8 index, u8 val)
 static void ayaneo_led_mc_open(void)
 {
         write_ec_ram(0x87, 0xa5);
+}
+
+static void ayaneo_led_mc_close_release(void)
+{
+        write_ec_ram(0x87, 0x00);
 }
 
 static void ayaneo_led_mc_close(u8 index)
@@ -402,6 +422,17 @@ static void ayaneo_led_mc_set(u8 group, u8 pos, u8 brightness)
                 return;
 }
 
+static void ayaneo_led_mc_release(void) {
+        if (!lock_global_acpi_lock())
+                return;
+
+        ec_write(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_RELEASE);
+
+        if (!unlock_global_acpi_lock())
+                return;
+
+}
+
 static void ayaneo_led_mc_intensity(u8 *color, u8 group, u8 zones[])
 {
         int zone;
@@ -464,6 +495,35 @@ static void ayaneo_led_mc_take_control(void)
                 }
 }
 
+static void ayaneo_led_mc_release_control(void)
+{
+        switch (model) {
+                case air:
+                case air_1s:
+                case air_pro:
+                case air_plus_mendo:
+                case geek:
+                case geek_1s:
+                case ayaneo_2:
+                case ayaneo_2s:
+                        ayaneo_led_mc_off(0x03);
+                        ayaneo_led_mc_release();
+                        break;
+                case air_plus:
+                case slide:
+                        ayaneo_led_mc_state(AYANEO_LED_MC_OFF);
+                        ayaneo_led_mc_close_release();
+                        break;
+                case kun:
+                        ayaneo_led_mc_off(0x03);
+                        ayaneo_led_mc_off(0x04);
+                        ayaneo_led_mc_release();
+                        break;
+                default:
+                        break;
+                }
+}
+
 /* RGB LED Logic */
 static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
                                       enum led_brightness brightness)
@@ -517,6 +577,54 @@ static enum led_brightness ayaneo_led_mc_brightness_get(struct led_classdev *led
         return led_cdev->brightness;
 };
 
+static ssize_t suspend_mode_show(struct device *dev, struct device_attribute *attr,
+                                 char *buf)
+{
+        bool active;
+        ssize_t count = 0;
+        int i;
+
+        for (i = 0; i <  ARRAY_SIZE(AYANEO_LED_SUSPEND_MODE_TEXT); i++) {
+                active = i == suspend_mode;
+
+                if (active) {
+                        count += sysfs_emit_at(buf, count, "[%s] ",
+                                   AYANEO_LED_SUSPEND_MODE_TEXT[i]);
+                }
+                else {
+                        count += sysfs_emit_at(buf, count, "%s ",
+                                   AYANEO_LED_SUSPEND_MODE_TEXT[i]);
+                }
+        }
+
+        if (count)
+                buf[count - 1] = '\n';
+
+        return count;
+}
+
+static ssize_t suspend_mode_store(struct device *dev, struct device_attribute *attr,
+                               const char *buf, size_t count)
+{
+        int res = sysfs_match_string(AYANEO_LED_SUSPEND_MODE_TEXT, buf);
+
+        if (res < 0)
+                return -EINVAL;
+
+        suspend_mode = res;
+
+        return count;
+}
+
+static DEVICE_ATTR_RW(suspend_mode);
+
+static struct attribute *ayaneo_led_mc_attrs[] = {
+        &dev_attr_suspend_mode.attr,
+        NULL,
+};
+
+ATTRIBUTE_GROUPS(ayaneo_led_mc);
+
 struct mc_subled ayaneo_led_mc_subled_info[] = {
         {
                 .color_index = LED_COLOR_ID_RED,
@@ -554,7 +662,30 @@ struct led_classdev_mc ayaneo_led_mc = {
 static int ayaneo_platform_resume(struct platform_device *pdev)
 {
         struct led_classdev *led_cdev = &ayaneo_led_mc.led_cdev;
+        ayaneo_led_mc_take_control();
         ayaneo_led_mc_brightness_set(led_cdev, led_cdev->brightness);
+        return 0;
+}
+
+static int ayaneo_platform_suspend(struct platform_device *pdev, pm_message_t state)
+{
+        switch (suspend_mode)
+        {
+        case AYANEO_LED_SUSPEND_MODE_OEM:
+                ayaneo_led_mc_release_control();
+                break;
+
+        case AYANEO_LED_SUSPEND_MODE_KEEP:
+                // Nothing to do.
+                break;
+
+        case AYANEO_LED_SUSPEND_MODE_OFF:
+                ayaneo_led_mc_take_control();
+                break;
+
+        default:
+                break;
+        }
         return 0;
 }
 
@@ -568,8 +699,14 @@ static int ayaneo_platform_probe(struct platform_device *pdev)
         ret = PTR_ERR_OR_ZERO(match);
         if (ret)
                 return ret;
+
+        ret = devm_device_add_groups(dev, ayaneo_led_mc_groups);
+        if (ret)
+                return ret;
+
         model = (enum ayaneo_model)match->driver_data;
         ayaneo_led_mc_take_control();
+
         ret = devm_led_classdev_multicolor_register(dev, &ayaneo_led_mc);
         return ret;
 }
@@ -580,6 +717,7 @@ static struct platform_driver ayaneo_platform_driver = {
         },
         .probe = ayaneo_platform_probe,
         .resume = ayaneo_platform_resume,
+        .suspend = ayaneo_platform_suspend,
 };
 
 static struct platform_device *ayaneo_platform_device;
