@@ -700,14 +700,14 @@ static int ayaneo_platform_probe(struct platform_device *pdev)
         if (ret)
                 return ret;
 
-        ret = devm_device_add_groups(dev, ayaneo_led_mc_groups);
-        if (ret)
-                return ret;
-
         model = (enum ayaneo_model)match->driver_data;
         ayaneo_led_mc_take_control();
 
         ret = devm_led_classdev_multicolor_register(dev, &ayaneo_led_mc);
+        if (ret)
+                return ret;
+
+        ret = devm_device_add_groups(ayaneo_led_mc.led_cdev.dev, ayaneo_led_mc_groups);
         return ret;
 }
 
