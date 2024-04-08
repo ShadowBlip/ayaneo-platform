@@ -10,6 +10,7 @@
  * Derived from original reverse engineering work by Maya Matuszczyk
  * <https://github.com/Maccraft123/ayaled>
  */
+#define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
 
 #include <linux/acpi.h>
 #include <linux/delay.h>
@@ -17,6 +18,7 @@
 #include <linux/init.h>
 #include <linux/io.h>
 #include <linux/kernel.h>
+#include <linux/kthread.h>
 #include <linux/led-class-multicolor.h>
 #include <linux/leds.h>
 #include <linux/module.h>
@@ -130,6 +132,7 @@ static bool unlock_global_acpi_lock(void)
 
 #define AYANEO_LED_WRITE_DELAY_LEGACY_MS        2
 #define AYANEO_LED_WRITE_DELAY_MS               10
+#define AYANEO_LED_WRITER_DELAY_RANGE_US        10000, 20000
 
 enum ayaneo_model {
         air = 1,
@@ -545,34 +548,25 @@ static void ayaneo_led_mc_scale_color(u8 *color, u8 max_value)
         }
 }
 
-/* RGB LED Logic */
-static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
-                                      enum led_brightness brightness)
+static struct task_struct *ayaneo_led_mc_writer_thread;
+static int ayaneo_led_mc_update_required;
+static u8 ayaneo_led_mc_update_color[3];
+DEFINE_RWLOCK(ayaneo_led_mc_update_lock);
+
+static void ayaneo_led_mc_brightness_apply(u8 *color)
 {
-        struct led_classdev_mc *mc_cdev = lcdev_to_mccdev(led_cdev);
-        int val;
-        int i;
-        struct mc_subled s_led;
         u8 color_l[3];
         u8 color_r[3];
         u8 color_b[3];
 
-        if (brightness < 0 || brightness > 255)
-                return;
-
-        led_cdev->brightness = brightness;
-
-        for (i = 0; i < mc_cdev->num_colors; i++) {
-                s_led = mc_cdev->subled_info[i];
-                if (s_led.intensity < 0 || s_led.intensity > 255)
-                        return;
-                val = brightness * s_led.intensity / led_cdev->max_brightness;
-                color_l[s_led.channel] = val;
-                color_r[s_led.channel] = val;
-                color_b[s_led.channel] = val;
-        }
-
         u8 zones[4] = {3, 6, 9, 12};
+
+        for (int i = 0; i < 3; i++)
+        {
+                color_l[i] = color[i];
+                color_r[i] = color[i];
+                color_b[i] = color[i];
+        }
 
         ayaneo_led_mc_scale_color(color_l, 192);
         ayaneo_led_mc_scale_color(color_r, 192);
@@ -629,6 +623,67 @@ static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
                 default:
                         break;
         }
+}
+
+int ayaneo_led_mc_writer(void *pv)
+{
+        pr_info("Writer thread started.\n");
+        int count;
+        u8 color[3];
+
+        while (!kthread_should_stop())
+        {
+                read_lock(&ayaneo_led_mc_update_lock);
+                count = ayaneo_led_mc_update_required;
+
+                if (count)
+                {
+                        color[0] = ayaneo_led_mc_update_color[0];
+                        color[1] = ayaneo_led_mc_update_color[1];
+                        color[2] = ayaneo_led_mc_update_color[2];
+                }
+                read_unlock(&ayaneo_led_mc_update_lock);
+
+                if (count)
+                {
+                        ayaneo_led_mc_brightness_apply(color);
+
+                        write_lock(&ayaneo_led_mc_update_lock);
+                        ayaneo_led_mc_update_required -= count;
+                        write_unlock(&ayaneo_led_mc_update_lock);
+                }
+                else
+                        usleep_range(AYANEO_LED_WRITER_DELAY_RANGE_US);
+        }
+
+        pr_info("Writer thread stopped.\n");
+        return 0;
+}
+
+/* RGB LED Logic */
+static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
+                                      enum led_brightness brightness)
+{
+        struct led_classdev_mc *mc_cdev = lcdev_to_mccdev(led_cdev);
+        int val;
+        int i;
+        struct mc_subled s_led;
+
+        if (brightness < 0 || brightness > 255)
+                return;
+
+        led_cdev->brightness = brightness;
+
+        write_lock(&ayaneo_led_mc_update_lock);
+        for (i = 0; i < mc_cdev->num_colors; i++) {
+                s_led = mc_cdev->subled_info[i];
+                if (s_led.intensity < 0 || s_led.intensity > 255)
+                        return;
+                val = brightness * s_led.intensity / led_cdev->max_brightness;
+                ayaneo_led_mc_update_color[s_led.channel] = val;
+        }
+        ayaneo_led_mc_update_required++;
+        write_unlock(&ayaneo_led_mc_update_lock);
 };
 
 static enum led_brightness ayaneo_led_mc_brightness_get(struct led_classdev *led_cdev)
@@ -719,14 +774,22 @@ struct led_classdev_mc ayaneo_led_mc = {
 
 static int ayaneo_platform_resume(struct platform_device *pdev)
 {
-        struct led_classdev *led_cdev = &ayaneo_led_mc.led_cdev;
         ayaneo_led_mc_take_control();
-        ayaneo_led_mc_brightness_set(led_cdev, led_cdev->brightness);
+
+        write_lock(&ayaneo_led_mc_update_lock);
+        ayaneo_led_mc_update_required++;
+        write_unlock(&ayaneo_led_mc_update_lock);
+
+        ayaneo_led_mc_writer_thread = kthread_run(ayaneo_led_mc_writer,
+                                                  NULL,
+                                                  "ayaneo-platform led writer");
         return 0;
 }
 
 static int ayaneo_platform_suspend(struct platform_device *pdev, pm_message_t state)
 {
+        kthread_stop(ayaneo_led_mc_writer_thread);
+
         switch (suspend_mode)
         {
         case AYANEO_LED_SUSPEND_MODE_OEM:
@@ -782,13 +845,30 @@ static struct platform_device *ayaneo_platform_device;
 
 static int __init ayaneo_platform_init(void)
 {
+        int ret;
         ayaneo_platform_device = platform_create_bundle(&ayaneo_platform_driver,
                                         ayaneo_platform_probe, NULL, 0, NULL, 0);
-        return PTR_ERR_OR_ZERO(ayaneo_platform_device);
+        ret = PTR_ERR_OR_ZERO(ayaneo_platform_device);
+        if (ret)
+                return ret;
+
+        ayaneo_led_mc_writer_thread = kthread_run(ayaneo_led_mc_writer,
+                                                  NULL,
+                                                  "ayaneo-platform led writer");
+
+        if (!ayaneo_led_mc_writer_thread)
+        {
+                pr_err("Failed to start writer thread.\n");
+                platform_device_unregister(ayaneo_platform_device);
+                return -1;
+        }
+
+        return 0;
 }
 
 static void __exit ayaneo_platform_exit(void)
 {
+        kthread_stop(ayaneo_led_mc_writer_thread);
         platform_device_unregister(ayaneo_platform_device);
         platform_driver_unregister(&ayaneo_platform_driver);
 }
