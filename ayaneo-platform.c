@@ -75,6 +75,9 @@ static bool unlock_global_acpi_lock(void)
 #define AYANEO_LED_MC_R_Q4_B     0x7e
 */
 
+#define AYANEO_LED_MC_L          0xb0
+#define AYANEO_LED_MC_R          0x70
+
 #define CLOSE_CMD_1              0x86
 #define CLOSE_CMD_2              0xc6
 
@@ -120,6 +123,9 @@ static bool unlock_global_acpi_lock(void)
 #define AYANEO_LED_MODE_RELEASE     0x00 /* close channel, release control */
 #define AYANEO_LED_MODE_WRITE       0x10 /* Default write mode */
 #define AYANEO_LED_MODE_HOLD        0xfe /* close channel, hold control */
+
+#define AYANEO_LED_WRITE_DELAY_LEGACY_MS        2
+#define AYANEO_LED_WRITE_DELAY_MS               10
 
 enum ayaneo_model {
         air = 1,
@@ -239,7 +245,7 @@ static const struct dmi_system_id dmi_table[] = {
         {},
 };
 
-static int write_ec_ram(u8 index, u8 val)
+static int ec_write_ram(u8 index, u8 val)
 {
         int ret;
 
@@ -266,139 +272,71 @@ static int write_ec_ram(u8 index, u8 val)
 }
 
 /* AIR Plus methods */
-static void ayaneo_led_mc_open(void)
+static void ayaneo_led_mc_set(u8 group, u8 pos, u8 brightness)
 {
-        write_ec_ram(0x87, 0xa5);
-}
+        u8 led_offset;
+        u8 close_cmd;
 
-static void ayaneo_led_mc_close_release(void)
-{
-        write_ec_ram(0x87, 0x00);
-}
-
-static void ayaneo_led_mc_close(u8 index)
-{
-        write_ec_ram(index, 0x01);
-}
-
-static void ayaneo_led_mc_write(void)
-{
-        write_ec_ram(0x70, 0x00);
-        ayaneo_led_mc_close(CLOSE_CMD_1);
-}
-
-static void ayaneo_led_mc_state(u8 state)
-{
-        // 0x31 = off
-        // 0x37 = on
-        u8 zone[2] = {0xb2, 0x72};
-        u8 zoneindex;
-
-        ayaneo_led_mc_open();
-        for (zoneindex = 0; zoneindex < 2; zoneindex++) {
-                write_ec_ram(zone[zoneindex], state);
-                ayaneo_led_mc_close(CLOSE_CMD_2);
+        if (group < 2)
+        {
+                led_offset = AYANEO_LED_MC_L;
+                close_cmd = CLOSE_CMD_2;
         }
-        ayaneo_led_mc_write();
+        else
+        {
+                led_offset = AYANEO_LED_MC_R;
+                close_cmd = CLOSE_CMD_1;
+        }
+
+        ec_write_ram(led_offset + pos, brightness);
+        ec_write_ram(close_cmd, 0x01);
+        mdelay(AYANEO_LED_WRITE_DELAY_MS);
 }
 
-/* Open every LED register as write enabled */
-static void ayaneo_led_mc_apply(void)
+static void ayaneo_led_mc_release(void)
 {
-        ayaneo_led_mc_state(AYANEO_LED_MC_ON);
-
-        ayaneo_led_mc_open();
-        write_ec_ram(0x70, 0x0);
-        ayaneo_led_mc_close(CLOSE_CMD_1);
-
-        ayaneo_led_mc_open();
-        write_ec_ram(0xb2, 0xba);
-        ayaneo_led_mc_close(CLOSE_CMD_2);
-
-        ayaneo_led_mc_open();
-        write_ec_ram(0x72, 0xba);
-        ayaneo_led_mc_close(CLOSE_CMD_1);
-
-        ayaneo_led_mc_open();
-        write_ec_ram(0xbf, 0x0);
-        ayaneo_led_mc_close(CLOSE_CMD_2);
-
-        ayaneo_led_mc_open();
-        write_ec_ram(0x7f, 0x0);
-        ayaneo_led_mc_close(CLOSE_CMD_2);
-
-        ayaneo_led_mc_open();
-        write_ec_ram(0xc0, 0x0);
-        ayaneo_led_mc_close(CLOSE_CMD_2);
-
-        ayaneo_led_mc_open();
-        write_ec_ram(0x80, 0x0);
-        ayaneo_led_mc_close(CLOSE_CMD_1);
-
-        ayaneo_led_mc_open();
-        write_ec_ram(0xc1, 0x5);
-        ayaneo_led_mc_close(CLOSE_CMD_2);
-
-        ayaneo_led_mc_open();
-        write_ec_ram(0x81, 0x5);
-        ayaneo_led_mc_close(CLOSE_CMD_2);
-
-        ayaneo_led_mc_open();
-        write_ec_ram(0xc2, 0x5);
-        ayaneo_led_mc_close(CLOSE_CMD_2);
-
-        ayaneo_led_mc_open();
-        write_ec_ram(0x82, 0x5);
-        ayaneo_led_mc_close(CLOSE_CMD_1);
-
-        ayaneo_led_mc_open();
-        write_ec_ram(0xc3, 0x5);
-        ayaneo_led_mc_close(CLOSE_CMD_1);
-
-        ayaneo_led_mc_open();
-        write_ec_ram(0x83, 0x5);
-        ayaneo_led_mc_close(CLOSE_CMD_1);
-
-        ayaneo_led_mc_open();
-        write_ec_ram(0xc4, 0x5);
-        ayaneo_led_mc_close(CLOSE_CMD_2);
-
-        ayaneo_led_mc_open();
-        write_ec_ram(0x84, 0x5);
-        ayaneo_led_mc_close(CLOSE_CMD_1);
-
-        ayaneo_led_mc_open();
-        write_ec_ram(0xc5, 0x7);
-        ayaneo_led_mc_close(CLOSE_CMD_2);
-
-        ayaneo_led_mc_open();
-        write_ec_ram(0x85, 0x7);
-        ayaneo_led_mc_close(CLOSE_CMD_1);
-
-        ayaneo_led_mc_write();
+        ec_write_ram(0x87, 0x00);
 }
 
-static void ayaneo_led_mc_color(u8 *color)
+static void ayaneo_led_mc_hold(void)
 {
-        u8 quadrant;
+        ec_write_ram(0x87, 0xa5);
+}
 
-        // Zone 1 (Left Stick)
-        ayaneo_led_mc_open();
-        for(quadrant = 0; quadrant < 12; quadrant++) {
-                write_ec_ram(0xB3 + quadrant, color[quadrant % 3]); // Quadrant 1
-        }
-        ayaneo_led_mc_write();
+static void ayaneo_led_mc_intensity(u8 group, u8 *color, u8 zones[])
+{
+        int zone;
 
-        // Zone 2 (Right Stick)
-        ayaneo_led_mc_open();
-        for(quadrant = 0; quadrant < 12; quadrant++) {
-                write_ec_ram(0x73 + quadrant, color[quadrant % 3]); // Quadrant 1
+        for (zone = 0; zone < 4; zone++) {
+                ayaneo_led_mc_set(group, zones[zone], color[0]);
+                ayaneo_led_mc_set(group, zones[zone] + 1, color[1]);
+                ayaneo_led_mc_set(group, zones[zone] + 2, color[2]);
         }
-        ayaneo_led_mc_write();
+}
+
+static void ayaneo_led_mc_off(void)
+{
+        ec_write_ram(0xb2, 0x31);
+        ec_write_ram(0x86, 0x01);
+        mdelay(AYANEO_LED_WRITE_DELAY_MS);
+}
+
+static void ayaneo_led_mc_on(void)
+{
+        ec_write_ram(0xb2, 0xb1);
+        ec_write_ram(0x86, 0x01);
+        mdelay(AYANEO_LED_WRITE_DELAY_MS);
+}
+
+static void ayaneo_led_mc_reset(void)
+{
+        ec_write_ram(0xb2, 0xc0);
+        ec_write_ram(0x86, 0x01);
+        mdelay(AYANEO_LED_WRITE_DELAY_MS);
 }
 
 /* Legacy methods */
-static void ayaneo_led_mc_set(u8 group, u8 pos, u8 brightness)
+static void ayaneo_led_mc_legacy_set(u8 group, u8 pos, u8 brightness)
 {
         if (!lock_global_acpi_lock())
                 return;
@@ -411,7 +349,7 @@ static void ayaneo_led_mc_set(u8 group, u8 pos, u8 brightness)
         if (!unlock_global_acpi_lock())
                 return;
 
-        mdelay(2);
+        mdelay(AYANEO_LED_WRITE_DELAY_LEGACY_MS);
 
         if (!lock_global_acpi_lock())
                 return;
@@ -422,7 +360,8 @@ static void ayaneo_led_mc_set(u8 group, u8 pos, u8 brightness)
                 return;
 }
 
-static void ayaneo_led_mc_release(void) {
+static void ayaneo_led_mc_legacy_release(void)
+{
         if (!lock_global_acpi_lock())
                 return;
 
@@ -430,43 +369,74 @@ static void ayaneo_led_mc_release(void) {
 
         if (!unlock_global_acpi_lock())
                 return;
-
 }
 
-static void ayaneo_led_mc_intensity(u8 *color, u8 group, u8 zones[])
+static void ayaneo_led_mc_legacy_hold(void)
+{
+        if (!lock_global_acpi_lock())
+                return;
+
+        ec_write(AYANEO_LED_MODE_REG, AYANEO_LED_MODE_HOLD);
+
+        if (!unlock_global_acpi_lock())
+                return;
+}
+
+static void ayaneo_led_mc_legacy_intensity(u8 group, u8 *color, u8 zones[])
 {
         int zone;
 
         for (zone = 0; zone < 4; zone++) {
-                ayaneo_led_mc_set(group, zones[zone], color[0]);
-                ayaneo_led_mc_set(group, zones[zone] + 1, color[1]);
-                ayaneo_led_mc_set(group, zones[zone] + 2, color[2]);
+                ayaneo_led_mc_legacy_set(group, zones[zone], color[0]);
+                ayaneo_led_mc_legacy_set(group, zones[zone] + 1, color[1]);
+                ayaneo_led_mc_legacy_set(group, zones[zone] + 2, color[2]);
         }
 }
 
 /* KUN doesn't use consistant zone mapping for RGB, adjust */
-static void ayaneo_led_mc_intensity_kun(u8 *color)
+static void ayaneo_led_mc_legacy_intensity_kun(u8 *color)
 {
         u8 zone_0 = {3};
         u8 zone_0_color[3] = {color[1], color[0], color[2]};
-        ayaneo_led_mc_intensity(zone_0_color, 0x03, &zone_0);
+        ayaneo_led_mc_legacy_intensity(0x03, zone_0_color, &zone_0);
         u8 zone_1 = {6};
         u8 zone_1_color[3] = {color[1], color[2], color[0]};
-        ayaneo_led_mc_intensity(zone_1_color, 0x03, &zone_1);
+        ayaneo_led_mc_legacy_intensity(0x03, zone_1_color, &zone_1);
         u8 zone_2 = {9};
         u8 zone_2_color[3] = {color[2], color[0], color[1]};
-        ayaneo_led_mc_intensity(zone_2_color, 0x03, &zone_2);
+        ayaneo_led_mc_legacy_intensity(0x03, zone_2_color, &zone_2);
         u8 zone_3 = {12};
         u8 zone_3_color[3] = {color[2], color[1], color[0]};
-        ayaneo_led_mc_intensity(zone_3_color, 0x03, &zone_3);
+        ayaneo_led_mc_legacy_intensity(0x03, zone_3_color, &zone_3);
         u8 button_color[3] = {color[2], color[0], color[1]};
-        ayaneo_led_mc_intensity(button_color, 0x04, &zone_3);
+        ayaneo_led_mc_legacy_intensity(0x04, button_color, &zone_3);
 }
 
-static void ayaneo_led_mc_off(u8 group)
+static void ayaneo_led_mc_legacy_off(void)
 {
-        ayaneo_led_mc_set(group, AYANEO_LED_CMD_OFF, 0xc0); // set all leds to off
-        ayaneo_led_mc_set(group, AYANEO_LED_CMD_OFF, 0x80); // needed to switch leds on again
+        ayaneo_led_mc_legacy_set(0x01, 0x02, 0x31);
+        ayaneo_led_mc_legacy_set(0x02, 0x02, 0x31);
+
+        // note: omit for aya flip when implemented
+        ayaneo_led_mc_legacy_set(0x03, 0x00, 0x00);
+}
+
+static void ayaneo_led_mc_legacy_on(void)
+{
+        ayaneo_led_mc_legacy_set(0x01, 0x02, 0xb1);
+        ayaneo_led_mc_legacy_set(0x02, 0x02, 0xb1);
+
+        // note: omit for aya flip when implemented
+        ayaneo_led_mc_legacy_set(0x03, 0x00, 0x00);
+}
+
+static void ayaneo_led_mc_legacy_reset(void)
+{
+        ayaneo_led_mc_legacy_set(0x01, 0x02, 0xc0);
+        ayaneo_led_mc_legacy_set(0x02, 0x02, 0xc0);
+
+        // note: omit for aya flip when implemented
+        ayaneo_led_mc_legacy_set(0x03, 0x00, 0x00);
 }
 
 static void ayaneo_led_mc_take_control(void)
@@ -480,15 +450,16 @@ static void ayaneo_led_mc_take_control(void)
                 case geek_1s:
                 case ayaneo_2:
                 case ayaneo_2s:
-                        ayaneo_led_mc_off(0x03);
+                case kun:
+                        ayaneo_led_mc_legacy_hold();
+                        ayaneo_led_mc_legacy_reset();
+                        ayaneo_led_mc_legacy_off();
                         break;
                 case air_plus:
                 case slide:
-                        ayaneo_led_mc_state(AYANEO_LED_MC_OFF);
-                        break;
-                case kun:
-                        ayaneo_led_mc_off(0x03);
-                        ayaneo_led_mc_off(0x04);
+                        ayaneo_led_mc_hold();
+                        ayaneo_led_mc_reset();
+                        ayaneo_led_mc_off();
                         break;
                 default:
                         break;
@@ -506,17 +477,13 @@ static void ayaneo_led_mc_release_control(void)
                 case geek_1s:
                 case ayaneo_2:
                 case ayaneo_2s:
-                        ayaneo_led_mc_off(0x03);
-                        ayaneo_led_mc_release();
+                case kun:
+                        ayaneo_led_mc_legacy_reset();
+                        ayaneo_led_mc_legacy_release();
                         break;
                 case air_plus:
                 case slide:
-                        ayaneo_led_mc_state(AYANEO_LED_MC_OFF);
-                        ayaneo_led_mc_close_release();
-                        break;
-                case kun:
-                        ayaneo_led_mc_off(0x03);
-                        ayaneo_led_mc_off(0x04);
+                        ayaneo_led_mc_reset();
                         ayaneo_led_mc_release();
                         break;
                 default:
@@ -547,6 +514,8 @@ static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
                 color[s_led.channel] = val;
         }
 
+        u8 zones[4] = {3, 6, 9, 12};
+
         switch (model) {
                 case air:
                 case air_1s:
@@ -556,16 +525,18 @@ static void ayaneo_led_mc_brightness_set(struct led_classdev *led_cdev,
                 case geek_1s:
                 case ayaneo_2:
                 case ayaneo_2s:
-                        u8 zones[4] = {3, 6, 9, 12};
-                        ayaneo_led_mc_intensity(color, 0x03, zones);
+                        ayaneo_led_mc_legacy_on();
+                        ayaneo_led_mc_legacy_intensity(0x03, color, zones);
                         break;
                 case air_plus:
                 case slide:
-                        ayaneo_led_mc_color(color);
-                        ayaneo_led_mc_apply();
+                        ayaneo_led_mc_on();
+                        ayaneo_led_mc_intensity(0x01, color, zones);
+                        ayaneo_led_mc_intensity(0x02, color, zones);
                         break;
                 case kun:
-                        ayaneo_led_mc_intensity_kun(color);
+                        ayaneo_led_mc_legacy_on();
+                        ayaneo_led_mc_legacy_intensity_kun(color);
                         break;
                 default:
                         break;
@@ -657,7 +628,6 @@ struct led_classdev_mc ayaneo_led_mc = {
         .num_colors = ARRAY_SIZE(ayaneo_led_mc_subled_info),
         .subled_info = ayaneo_led_mc_subled_info,
 };
-
 
 static int ayaneo_platform_resume(struct platform_device *pdev)
 {
