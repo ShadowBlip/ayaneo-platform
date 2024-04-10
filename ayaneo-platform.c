@@ -45,9 +45,6 @@ static bool unlock_global_acpi_lock(void)
 #define AYANEO_ADDR_PORT         0x4e
 #define AYANEO_DATA_PORT         0x4f
 #define AYANEO_HIGH_BYTE         0xd1
-#define AYANEO_LED_MC_OFF        0x31
-#define AYANEO_LED_MC_ON         0x37
-
 
 /* RGB LED EC Ram Registers */
 /*
@@ -77,11 +74,20 @@ static bool unlock_global_acpi_lock(void)
 #define AYANEO_LED_MC_R_Q4_B     0x7e
 */
 
-#define AYANEO_LED_MC_L          0xb0
-#define AYANEO_LED_MC_R          0x70
+#define AYANEO_LED_MC_ADDR_L          0xb0
+#define AYANEO_LED_MC_ADDR_R          0x70
 
-#define CLOSE_CMD_1              0x86
-#define CLOSE_CMD_2              0xc6
+#define AYANEO_LED_MC_ADDR_CLOSE_1    0x86
+#define AYANEO_LED_MC_ADDR_CLOSE_2    0xc6
+
+#define AYANEO_LED_MC_ENABLE_ADDR     0xb2
+#define AYANEO_LED_MC_ENABLE_ON       0xb1
+#define AYANEO_LED_MC_ENABLE_OFF      0x31
+#define AYANEO_LED_MC_ENABLE_RESET    0xc0
+
+#define AYANEO_LED_MC_MODE_ADDR       0x87
+#define AYANEO_LED_MC_MODE_HOLD       0xa5
+#define AYANEO_LED_MC_MODE_RELEASE    0x00
 
 /* Schema:
 #
@@ -119,7 +125,11 @@ static bool unlock_global_acpi_lock(void)
 #define AYANEO_LED_POS              0xb1
 #define AYANEO_LED_BRIGHTNESS       0xb2
 #define AYANEO_LED_MODE_REG         0xbf
-#define AYANEO_LED_CMD_OFF          0x02
+
+#define AYANEO_LED_CMD_ENABLE_ADDR  0x02
+#define AYANEO_LED_CMD_ENABLE_ON    0xb1
+#define AYANEO_LED_CMD_ENABLE_OFF   0x31
+#define AYANEO_LED_CMD_ENABLE_RESET 0xc0
 
 /* RGB Mode values */
 #define AYANEO_LED_MODE_RELEASE     0x00 /* close channel, release control */
@@ -128,6 +138,7 @@ static bool unlock_global_acpi_lock(void)
 
 #define AYANEO_LED_GROUP_LEFT       0x01
 #define AYANEO_LED_GROUP_RIGHT      0x02
+#define AYANEO_LED_GROUP_LEFT_RIGHT 0x03
 #define AYANEO_LED_GROUP_BUTTON     0x04
 
 #define AYANEO_LED_WRITE_DELAY_LEGACY_MS        2
@@ -279,7 +290,42 @@ static int ec_write_ram(u8 index, u8 val)
         return ret;
 }
 
-/* AIR Plus methods */
+/* Function Summary
+# AyaNeo devices can be largely divided into 2 groups; modern and legacy.
+# - Legacy devices use a microcontroller either embedded into or controlled via
+# the system's ACPI controller.
+# - Modern devices use a dedicated microcontroller and communicate via shared
+# memory.
+#
+# The control scheme is largely shared between the 2 device types and many of
+# the command values are shared.
+#
+# ayaneo_led_mc_set / ayaneo_led_mc_legacy_set
+#       Sets the value of a single address or subpixel
+#
+# ayaneo_led_mc_release / ayaneo_led_mc_legacy_release
+#       Releases control of the LEDs back to the microcontroller.
+#       This function is abstracted by ayaneo_led_mc_release_control.
+#
+# ayaneo_led_mc_hold / ayaneo_led_mc_legacy_hold
+#       Takes and holds control of the LEDs from the microcontroller.
+#       This function is abstracted by ayaneo_led_mc_take_control.
+#
+# ayaneo_led_mc_intensity / ayaneo_led_mc_legacy_intensity
+#       Sets the values of all of the LEDs in the zones of a given group.
+#
+# ayaneo_led_mc_off / ayaneo_led_mc_legacy_off
+#       Instructs the microcontroller to disable output for the given group.
+#
+# ayaneo_led_mc_on / ayaneo_led_mc_legacy_on
+#       Instructs the microcontroller to enable output for the given group.
+#
+# ayaneo_led_mc_reset / ayaneo_led_mc_legacy_reset
+#       Reverts all of the microcontroller internal registers to power on
+#       defaults.
+*/
+
+/* Dedicated microcontroller methods */
 static void ayaneo_led_mc_set(u8 group, u8 pos, u8 brightness)
 {
         u8 led_offset;
@@ -287,13 +333,13 @@ static void ayaneo_led_mc_set(u8 group, u8 pos, u8 brightness)
 
         if (group < 2)
         {
-                led_offset = AYANEO_LED_MC_L;
-                close_cmd = CLOSE_CMD_2;
+                led_offset = AYANEO_LED_MC_ADDR_L;
+                close_cmd = AYANEO_LED_MC_ADDR_CLOSE_2;
         }
         else
         {
-                led_offset = AYANEO_LED_MC_R;
-                close_cmd = CLOSE_CMD_1;
+                led_offset = AYANEO_LED_MC_ADDR_R;
+                close_cmd = AYANEO_LED_MC_ADDR_CLOSE_1;
         }
 
         ec_write_ram(led_offset + pos, brightness);
@@ -303,12 +349,12 @@ static void ayaneo_led_mc_set(u8 group, u8 pos, u8 brightness)
 
 static void ayaneo_led_mc_release(void)
 {
-        ec_write_ram(0x87, 0x00);
+        ec_write_ram(AYANEO_LED_MC_MODE_ADDR, AYANEO_LED_MC_MODE_RELEASE);
 }
 
 static void ayaneo_led_mc_hold(void)
 {
-        ec_write_ram(0x87, 0xa5);
+        ec_write_ram(AYANEO_LED_MC_MODE_ADDR, AYANEO_LED_MC_MODE_HOLD);
 }
 
 static void ayaneo_led_mc_intensity(u8 group, u8 *color, u8 zones[])
@@ -324,26 +370,26 @@ static void ayaneo_led_mc_intensity(u8 group, u8 *color, u8 zones[])
 
 static void ayaneo_led_mc_off(void)
 {
-        ec_write_ram(0xb2, 0x31);
-        ec_write_ram(0x86, 0x01);
+        ec_write_ram(AYANEO_LED_MC_ENABLE_ADDR, AYANEO_LED_MC_ENABLE_OFF);
+        ec_write_ram(AYANEO_LED_MC_ADDR_CLOSE_1, 0x01);
         mdelay(AYANEO_LED_WRITE_DELAY_MS);
 }
 
 static void ayaneo_led_mc_on(void)
 {
-        ec_write_ram(0xb2, 0xb1);
-        ec_write_ram(0x86, 0x01);
+        ec_write_ram(AYANEO_LED_MC_ENABLE_ADDR, AYANEO_LED_MC_ENABLE_ON);
+        ec_write_ram(AYANEO_LED_MC_ADDR_CLOSE_1, 0x01);
         mdelay(AYANEO_LED_WRITE_DELAY_MS);
 }
 
 static void ayaneo_led_mc_reset(void)
 {
-        ec_write_ram(0xb2, 0xc0);
-        ec_write_ram(0x86, 0x01);
+        ec_write_ram(AYANEO_LED_MC_ENABLE_ADDR, AYANEO_LED_MC_ENABLE_RESET);
+        ec_write_ram(AYANEO_LED_MC_ADDR_CLOSE_1, 0x01);
         mdelay(AYANEO_LED_WRITE_DELAY_MS);
 }
 
-/* Legacy methods */
+/* ACPI controller methods */
 static void ayaneo_led_mc_legacy_set(u8 group, u8 pos, u8 brightness)
 {
         if (!lock_global_acpi_lock())
@@ -390,23 +436,23 @@ static void ayaneo_led_mc_legacy_hold(void)
                 return;
 }
 
-static void ayaneo_led_mc_legacy_intensity(u8 group, u8 *color, u8 zones[])
-{
-        int zone;
-
-        for (zone = 0; zone < 4; zone++) {
-                ayaneo_led_mc_legacy_set(group, zones[zone], color[0]);
-                ayaneo_led_mc_legacy_set(group, zones[zone] + 1, color[1]);
-                ayaneo_led_mc_legacy_set(group, zones[zone] + 2, color[2]);
-        }
-        ayaneo_led_mc_legacy_set(0x03, 0x00, 0x00);
-}
-
 static void ayaneo_led_mc_legacy_intensity_single(u8 group, u8 *color, u8 zone)
 {
         ayaneo_led_mc_legacy_set(group, zone, color[0]);
         ayaneo_led_mc_legacy_set(group, zone + 1, color[1]);
         ayaneo_led_mc_legacy_set(group, zone + 2, color[2]);
+}
+
+static void ayaneo_led_mc_legacy_intensity(u8 group, u8 *color, u8 zones[])
+{
+        int zone;
+
+        for (zone = 0; zone < 4; zone++) {
+                ayaneo_led_mc_legacy_intensity_single(group, color, zones[zone]);
+        }
+
+        // note: omit for aya flip when implemented, causes unexpected behavior
+        ayaneo_led_mc_legacy_set(AYANEO_LED_GROUP_LEFT_RIGHT, 0x00, 0x00);
 }
 
 /* KUN doesn't use consistant zone mapping for RGB, adjust */
@@ -422,7 +468,7 @@ static void ayaneo_led_mc_legacy_intensity_kun(u8 group, u8 *color)
                 remap_color[1] = color[0];
                 remap_color[2] = color[1];
                 ayaneo_led_mc_legacy_intensity_single(AYANEO_LED_GROUP_BUTTON, remap_color, zone);
-                ayaneo_led_mc_legacy_set(0x03, 0x00, 0x00);
+                ayaneo_led_mc_legacy_set(AYANEO_LED_GROUP_LEFT_RIGHT, 0x00, 0x00);
                 return;
         }
 
@@ -450,36 +496,43 @@ static void ayaneo_led_mc_legacy_intensity_kun(u8 group, u8 *color)
         remap_color[2] = color[0];
         ayaneo_led_mc_legacy_intensity_single(group, remap_color, zone);
 
-        ayaneo_led_mc_legacy_set(0x03, 0x00, 0x00);
+        ayaneo_led_mc_legacy_set(AYANEO_LED_GROUP_LEFT_RIGHT, 0x00, 0x00);
 }
 
 static void ayaneo_led_mc_legacy_off(void)
 {
-        ayaneo_led_mc_legacy_set(0x01, 0x02, 0x31);
-        ayaneo_led_mc_legacy_set(0x02, 0x02, 0x31);
+        ayaneo_led_mc_legacy_set(AYANEO_LED_GROUP_LEFT,
+                AYANEO_LED_CMD_ENABLE_ADDR, AYANEO_LED_CMD_ENABLE_OFF);
+        ayaneo_led_mc_legacy_set(AYANEO_LED_GROUP_RIGHT,
+                AYANEO_LED_CMD_ENABLE_ADDR, AYANEO_LED_CMD_ENABLE_OFF);
 
-        // note: omit for aya flip when implemented
-        ayaneo_led_mc_legacy_set(0x03, 0x00, 0x00);
+        // note: omit for aya flip when implemented, causes unexpected behavior
+        ayaneo_led_mc_legacy_set(AYANEO_LED_GROUP_LEFT_RIGHT, 0x00, 0x00);
 }
 
 static void ayaneo_led_mc_legacy_on(void)
 {
-        ayaneo_led_mc_legacy_set(0x01, 0x02, 0xb1);
-        ayaneo_led_mc_legacy_set(0x02, 0x02, 0xb1);
+        ayaneo_led_mc_legacy_set(AYANEO_LED_GROUP_LEFT,
+                AYANEO_LED_CMD_ENABLE_ADDR, AYANEO_LED_CMD_ENABLE_ON);
+        ayaneo_led_mc_legacy_set(AYANEO_LED_GROUP_RIGHT,
+                AYANEO_LED_CMD_ENABLE_ADDR, AYANEO_LED_CMD_ENABLE_ON);
 
-        // note: omit for aya flip when implemented
-        ayaneo_led_mc_legacy_set(0x03, 0x00, 0x00);
+        // note: omit for aya flip when implemented, causes unexpected behavior
+        ayaneo_led_mc_legacy_set(AYANEO_LED_GROUP_LEFT_RIGHT, 0x00, 0x00);
 }
 
 static void ayaneo_led_mc_legacy_reset(void)
 {
-        ayaneo_led_mc_legacy_set(0x01, 0x02, 0xc0);
-        ayaneo_led_mc_legacy_set(0x02, 0x02, 0xc0);
+        ayaneo_led_mc_legacy_set(AYANEO_LED_GROUP_LEFT,
+                AYANEO_LED_CMD_ENABLE_ADDR, AYANEO_LED_CMD_ENABLE_RESET);
+        ayaneo_led_mc_legacy_set(AYANEO_LED_GROUP_RIGHT,
+                AYANEO_LED_CMD_ENABLE_ADDR, AYANEO_LED_CMD_ENABLE_RESET);
 
-        // note: omit for aya flip when implemented
-        ayaneo_led_mc_legacy_set(0x03, 0x00, 0x00);
+        // note: omit for aya flip when implemented, causes unexpected behavior
+        ayaneo_led_mc_legacy_set(AYANEO_LED_GROUP_LEFT_RIGHT, 0x00, 0x00);
 }
 
+/* Device command abstractions */
 static void ayaneo_led_mc_take_control(void)
 {
         switch (model) {
@@ -534,6 +587,37 @@ static void ayaneo_led_mc_release_control(void)
                 }
 }
 
+/* Threaded writes:
+# The writer thread's job is to push updates to the physical LEDs as fast as
+# possible while allowing updates to the LED multi_intensity/brightness sysfs
+# attributes to return quickly.
+#
+# During multi_intensity/brightness set, the ayaneo_led_mc_update_color array
+# is updated with the target color and ayaneo_led_mc_update_required is
+# incremented by 1.
+#
+# When the writer thread begins its next loop, it copies the current values of
+# ayaneo_led_mc_update_required, and ayaneo_led_mc_update_color, after which
+# the new color is pushed to the microcontroller. After the color has been
+# pushed the writer thread subtracts the starting value from
+# ayaneo_led_mc_update_required. If any updates were pushed to
+# ayaneo_led_mc_update_required during the writes then the following iteration
+# will immediately begin writing the new colors to the microcontroller,
+# otherwise it'll sleep for a short while.
+#
+# Updates to ayaneo_led_mc_update_required and ayaneo_led_mc_update_color are
+# syncronised by ayaneo_led_mc_update_lock to prevent a race condition between
+# the writer thread and the brightness set function.
+#
+# During suspend the kthread_stop is called which causes the writer thread to
+# terminate after its current iteration. Th writer thread is then restarted
+# during resume to allow updates to continue.
+*/
+static struct task_struct *ayaneo_led_mc_writer_thread;
+static int ayaneo_led_mc_update_required;
+static u8 ayaneo_led_mc_update_color[3];
+DEFINE_RWLOCK(ayaneo_led_mc_update_lock);
+
 static void ayaneo_led_mc_scale_color(u8 *color, u8 max_value)
 {
         for (int i = 0; i < 3; i++)
@@ -547,11 +631,6 @@ static void ayaneo_led_mc_scale_color(u8 *color, u8 max_value)
                 color[i] = (u8)c_color;
         }
 }
-
-static struct task_struct *ayaneo_led_mc_writer_thread;
-static int ayaneo_led_mc_update_required;
-static u8 ayaneo_led_mc_update_color[3];
-DEFINE_RWLOCK(ayaneo_led_mc_update_lock);
 
 static void ayaneo_led_mc_brightness_apply(u8 *color)
 {
@@ -691,6 +770,19 @@ static enum led_brightness ayaneo_led_mc_brightness_get(struct led_classdev *led
         return led_cdev->brightness;
 };
 
+/* Suspend Mode
+# Multiple modes of operation are supported during suspend:
+#
+# OEM:  Retains the default behavior of the device by returning control to the
+#       microcontroller. On most devices the LEDs will flash periodically, and
+#       will turn red when charging.
+# Off:  The LEDs are turned off during suspend, and control of the LEDs is
+#       retained by the driver. On most devices, charging will not turn on the
+#       LEDs. During resume, the last color set is restored.
+# Keep: The color currently set on the LEDs remains unchanged, and control of
+#       the LEDs is retained by the driver. On most devices, charging will not
+#       change the color of the LEDs.
+*/
 static ssize_t suspend_mode_show(struct device *dev, struct device_attribute *attr,
                                  char *buf)
 {
