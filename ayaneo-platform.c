@@ -609,9 +609,9 @@ static void ayaneo_led_mc_release_control(void)
 # syncronised by ayaneo_led_mc_update_lock to prevent a race condition between
 # the writer thread and the brightness set function.
 #
-# During suspend the kthread_stop is called which causes the writer thread to
-# terminate after its current iteration. Th writer thread is then restarted
-# during resume to allow updates to continue.
+# During suspend kthread_stop is called which causes the writer thread to
+# terminate after its current iteration. The writer thread is restarted during
+# resume to allow updates to continue.
 */
 static struct task_struct *ayaneo_led_mc_writer_thread;
 static int ayaneo_led_mc_update_required;
