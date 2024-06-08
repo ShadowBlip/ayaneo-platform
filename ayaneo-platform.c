@@ -859,9 +859,33 @@ static ssize_t suspend_mode_store(struct device *dev, struct device_attribute *a
 static DEVICE_ATTR_RW(suspend_mode);
 
 static struct attribute *ayaneo_led_mc_attrs[] = {
-        &dev_attr_suspend_mode.attr,
+        NULL,
         NULL,
 };
+
+static void suspend_mode_register_attr(void)
+{
+        switch (model) {
+                case air:
+                case air_1s:
+                case air_1s_limited:
+                case air_pro:
+                case air_plus_mendo:
+                case geek:
+                case geek_1s:
+                case ayaneo_2:
+                case ayaneo_2s:
+                case kun:
+                        ayaneo_led_mc_attrs[0] = &dev_attr_suspend_mode.attr;
+                        break;
+                case air_plus:
+                case slide:
+                        // Not currently working; do not register
+                        break;
+                default:
+                        break;
+        }
+}
 
 ATTRIBUTE_GROUPS(ayaneo_led_mc);
 
@@ -948,6 +972,7 @@ static int ayaneo_platform_probe(struct platform_device *pdev)
                 return ret;
 
         model = (enum ayaneo_model)match->driver_data;
+        suspend_mode_register_attr();
         ayaneo_led_mc_take_control();
 
         ret = devm_led_classdev_multicolor_register(dev, &ayaneo_led_mc);
