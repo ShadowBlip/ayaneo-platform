@@ -142,7 +142,7 @@ static bool unlock_global_acpi_lock(void)
 #define AYANEO_LED_GROUP_BUTTON     0x04
 
 #define AYANEO_LED_WRITE_DELAY_LEGACY_MS        2
-#define AYANEO_LED_WRITE_DELAY_MS               10
+#define AYANEO_LED_WRITE_DELAY_MS               1
 #define AYANEO_LED_WRITER_DELAY_RANGE_US        10000, 20000
 
 enum ayaneo_model {
@@ -355,6 +355,27 @@ static void ayaneo_led_mc_release(void)
 static void ayaneo_led_mc_hold(void)
 {
         ec_write_ram(AYANEO_LED_MC_MODE_ADDR, AYANEO_LED_MC_MODE_HOLD);
+
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT_RIGHT, 0x00, 0x00);
+
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT, 0x02, 0xba);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT, 0x02, 0xba);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT, 0x0f, 0x00);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT, 0x0f, 0x00);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT, 0x10, 0x00);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT, 0x10, 0x00);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT, 0x11, 0x05);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT, 0x11, 0x05);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT, 0x12, 0x05);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT, 0x12, 0x05);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT, 0x13, 0x05);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT, 0x13, 0x05);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT, 0x14, 0x05);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT, 0x14, 0x05);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT, 0x15, 0x07);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT, 0x15, 0x07);
+
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT_RIGHT, 0x00, 0x00);
 }
 
 static void ayaneo_led_mc_intensity(u8 group, u8 *color, u8 zones[])
@@ -366,6 +387,9 @@ static void ayaneo_led_mc_intensity(u8 group, u8 *color, u8 zones[])
                 ayaneo_led_mc_set(group, zones[zone] + 1, color[1]);
                 ayaneo_led_mc_set(group, zones[zone] + 2, color[2]);
         }
+
+        // note: omit for aya flip when implemented, causes unexpected behavior
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT_RIGHT, 0x00, 0x00);
 }
 
 static void ayaneo_led_mc_off(void)
@@ -373,6 +397,9 @@ static void ayaneo_led_mc_off(void)
         ec_write_ram(AYANEO_LED_MC_ENABLE_ADDR, AYANEO_LED_MC_ENABLE_OFF);
         ec_write_ram(AYANEO_LED_MC_ADDR_CLOSE_1, 0x01);
         mdelay(AYANEO_LED_WRITE_DELAY_MS);
+
+        // note: omit for aya flip when implemented, causes unexpected behavior
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT_RIGHT, 0x00, 0x00);
 }
 
 static void ayaneo_led_mc_on(void)
@@ -380,6 +407,9 @@ static void ayaneo_led_mc_on(void)
         ec_write_ram(AYANEO_LED_MC_ENABLE_ADDR, AYANEO_LED_MC_ENABLE_ON);
         ec_write_ram(AYANEO_LED_MC_ADDR_CLOSE_1, 0x01);
         mdelay(AYANEO_LED_WRITE_DELAY_MS);
+
+        // note: omit for aya flip when implemented, causes unexpected behavior
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT_RIGHT, 0x00, 0x00);
 }
 
 static void ayaneo_led_mc_reset(void)
@@ -387,6 +417,9 @@ static void ayaneo_led_mc_reset(void)
         ec_write_ram(AYANEO_LED_MC_ENABLE_ADDR, AYANEO_LED_MC_ENABLE_RESET);
         ec_write_ram(AYANEO_LED_MC_ADDR_CLOSE_1, 0x01);
         mdelay(AYANEO_LED_WRITE_DELAY_MS);
+
+        // note: omit for aya flip when implemented, causes unexpected behavior
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT_RIGHT, 0x00, 0x00);
 }
 
 /* ACPI controller methods */
@@ -704,6 +737,7 @@ static void ayaneo_led_mc_brightness_apply(u8 *color)
         }
 }
 
+int ayaneo_led_mc_writer(void *pv);
 int ayaneo_led_mc_writer(void *pv)
 {
         pr_info("Writer thread started.\n");
