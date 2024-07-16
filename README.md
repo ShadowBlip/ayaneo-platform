@@ -110,3 +110,69 @@ $ echo "255" | sudo tee /sys/class/leds/multicolor:chassis/brightness
 $ echo "255 0 128" | sudo tee /sys/class/leds/multicolor:chassis/multi_intensity
 255 0 128
 ```
+
+## Changing Startup Defaults
+The platform driver is fully exposed over systemd udev. This can be used to write udev rules that set attributes at startup.
+
+### Udev Attributes Tree
+```shell
+$ udevadm info --attribute-walk /sys/class/leds/multicolor:chassis
+
+  looking at device '/devices/platform/ayaneo-platform/leds/multicolor:chassis':
+    KERNEL=="multicolor:chassis"
+    SUBSYSTEM=="leds"
+    DRIVER==""
+    ATTR{brightness}=="0"
+    ATTR{max_brightness}=="255"
+    ATTR{multi_index}=="red green blue"
+    ATTR{multi_intensity}=="0 0 0"
+    ATTR{power/control}=="auto"
+    ATTR{power/runtime_active_time}=="0"
+    ATTR{power/runtime_status}=="unsupported"
+    ATTR{power/runtime_suspended_time}=="0"
+    ATTR{suspend_mode}=="[oem] keep off"
+    ATTR{trigger}=="[none] usb-gadget usb-host rc-feedback kbd-scrolllock kbd-numlock kbd-capslo>
+
+  looking at parent device '/devices/platform/ayaneo-platform':
+    KERNELS=="ayaneo-platform"
+    SUBSYSTEMS=="platform"
+    DRIVERS=="ayaneo-platform"
+    ATTRS{driver_override}=="(null)"
+    ATTRS{power/control}=="auto"
+    ATTRS{power/runtime_active_time}=="0"
+    ATTRS{power/runtime_status}=="unsupported"
+    ATTRS{power/runtime_suspended_time}=="0"
+
+  looking at parent device '/devices/platform':
+    KERNELS=="platform"
+    SUBSYSTEMS==""
+    DRIVERS==""
+    ATTRS{power/control}=="auto"
+    ATTRS{power/runtime_active_time}=="0"
+    ATTRS{power/runtime_status}=="unsupported"
+    ATTRS{power/runtime_suspended_time}=="0"
+```
+
+
+### Creating a rule
+You can store a udev rule as `/etc/udev/rules.d/##-rule_name.rules`
+
+All rules will start like this:
+`ACTION=="add|change", KERNEL=="multicolor:chassis", SUBSYSTEM=="leds"`
+
+To define a default, add the attribute in the format `ATTR{name}=value`
+Valid attributes are:
+```
+ATTR{brightness}=="[0-255]"
+ATTR{multi_intensity}=="[0-255] [0-255] [0-255]"
+ATTR{suspend_mode}=="[oem|keep|off]"
+```
+
+As en example, to set `suspend_mode`to `off`:
+`ACTION=="add|change", KERNEL=="multicolor:chassis", SUBSYSTEM=="leds", ATTR{suspend_mode}="off"
+`
+
+to create the rule in one line:
+```shell
+$ echo 'ACTION=="add|change", KERNEL=="multicolor:chassis", SUBSYSTEM=="leds", ATTR{suspend_mode}="off"' | sudo tee /etc/udev/rules.d/99-led_suspend_mode.rules
+```
