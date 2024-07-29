@@ -979,7 +979,7 @@ static int ayaneo_platform_probe(struct platform_device *pdev)
         if (ret)
                 return ret;
 
-        ret = devm_device_add_groups(ayaneo_led_mc.led_cdev.dev, ayaneo_led_mc_groups);
+        ret = devm_device_add_group(ayaneo_led_mc.led_cdev.dev, ayaneo_led_mc_groups);
         return ret;
 }
 
