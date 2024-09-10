@@ -1018,6 +1018,18 @@ static int ayaneo_platform_probe(struct platform_device *pdev)
         return ret;
 }
 
+static void ayaneo_platform_shutdown(struct platform_device *pdev)
+{
+        kthread_stop(ayaneo_led_mc_writer_thread);
+        ayaneo_led_mc_release_control();
+}
+
+static void ayaneo_platform_remove(struct platform_device *pdev)
+{
+        kthread_stop(ayaneo_led_mc_writer_thread);
+        ayaneo_led_mc_release_control();
+}
+
 static struct platform_driver ayaneo_platform_driver = {
         .driver = {
                 .name = "ayaneo-platform",
@@ -1025,6 +1037,8 @@ static struct platform_driver ayaneo_platform_driver = {
         .probe = ayaneo_platform_probe,
         .resume = ayaneo_platform_resume,
         .suspend = ayaneo_platform_suspend,
+        .shutdown = ayaneo_platform_shutdown,
+        .remove_new = ayaneo_platform_remove,
 };
 
 static struct platform_device *ayaneo_platform_device;
