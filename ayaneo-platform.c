@@ -135,6 +135,12 @@ static bool unlock_global_acpi_lock(void)
 #define AYANEO_LED_CMD_WATCHDOG_ADDR  0x15
 #define AYANEO_LED_CMD_WATCHDOG_ON    0x07
 
+#define AYANEO_LED_CMD_ANIM_1_ADDR    0x11 /* Animation step 1 */
+#define AYANEO_LED_CMD_ANIM_2_ADDR    0x12 /* Animation step 2 */
+#define AYANEO_LED_CMD_ANIM_3_ADDR    0x13 /* Animation step 3 */
+#define AYANEO_LED_CMD_ANIM_4_ADDR    0x14 /* Animation step 4 */
+#define AYANEO_LED_CMD_ANIM_STATIC    0x05
+
 /* RGB Mode values */
 #define AYANEO_LED_MODE_RELEASE       0x00 /* close channel, release control */
 #define AYANEO_LED_MODE_WRITE         0x10 /* Default write mode */
@@ -406,15 +412,23 @@ static void ayaneo_led_mc_on(void)
         ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT,
                 AYANEO_LED_CMD_FADE_ADDR, AYANEO_LED_CMD_FADE_OFF);
 
-        // set each sector to RGB mode
-        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT, 0x11, 0x05);
-        ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT, 0x11, 0x05);
-        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT, 0x12, 0x05);
-        ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT, 0x12, 0x05);
-        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT, 0x13, 0x05);
-        ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT, 0x13, 0x05);
-        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT, 0x14, 0x05);
-        ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT, 0x14, 0x05);
+        // Set static color animation
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT,
+                AYANEO_LED_CMD_ANIM_1_ADDR, AYANEO_LED_CMD_ANIM_STATIC);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT,
+                AYANEO_LED_CMD_ANIM_1_ADDR, AYANEO_LED_CMD_ANIM_STATIC);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT,
+                AYANEO_LED_CMD_ANIM_2_ADDR, AYANEO_LED_CMD_ANIM_STATIC);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT,
+                AYANEO_LED_CMD_ANIM_2_ADDR, AYANEO_LED_CMD_ANIM_STATIC);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT,
+                AYANEO_LED_CMD_ANIM_3_ADDR, AYANEO_LED_CMD_ANIM_STATIC);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT,
+                AYANEO_LED_CMD_ANIM_3_ADDR, AYANEO_LED_CMD_ANIM_STATIC);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT,
+                AYANEO_LED_CMD_ANIM_4_ADDR, AYANEO_LED_CMD_ANIM_STATIC);
+        ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT,
+                AYANEO_LED_CMD_ANIM_4_ADDR, AYANEO_LED_CMD_ANIM_STATIC);
 
         ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT,
                 AYANEO_LED_CMD_WATCHDOG_ADDR, AYANEO_LED_CMD_WATCHDOG_ON);
