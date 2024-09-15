@@ -148,6 +148,7 @@ static bool unlock_global_acpi_lock(void)
 #define AYANEO_LED_WRITE_DELAY_LEGACY_MS        2
 #define AYANEO_LED_WRITE_DELAY_MS               1
 #define AYANEO_LED_WRITER_DELAY_RANGE_US        10000, 20000
+#define AYANEO_LED_SUSPEND_RESUME_DELAY_MS      100
 
 enum ayaneo_model {
         air = 1,
@@ -943,6 +944,9 @@ static int ayaneo_platform_resume(struct platform_device *pdev)
         ayaneo_led_mc_update_required++;
         write_unlock(&ayaneo_led_mc_update_lock);
 
+        // Allow the MCU to sync with the new state.
+        msleep(AYANEO_LED_SUSPEND_RESUME_DELAY_MS);
+
         ayaneo_led_mc_writer_thread = kthread_run(ayaneo_led_mc_writer,
                                                   NULL,
                                                   "ayaneo-platform led writer");
@@ -970,6 +974,10 @@ static int ayaneo_platform_suspend(struct platform_device *pdev, pm_message_t st
         default:
                 break;
         }
+
+        // Allow the MCU to sync with the new state.
+        msleep(AYANEO_LED_SUSPEND_RESUME_DELAY_MS);
+
         return 0;
 }
 
