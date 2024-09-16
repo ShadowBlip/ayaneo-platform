@@ -6,8 +6,8 @@
  * Copyright (C) 2023-2024 Derek J. Clark <derekjohn.clark@gmail.com>
  * Copyright (C) 2023-2024 JELOS <https://github.com/JustEnoughLinuxOS>
  * Copyright (C) 2024 Sebastian Kranz <https://github.com/Lightwars>
- * Copyright (C) 2024 SytheZN <https://github.com/SytheZN>
- * Derived from original reverse engineering work by Maya Matuszczyk
+ * Copyright (C) 2024 Trevor Heslop <https://github.com/SytheZN>
+ * Derived from ayaled originally developed by Maya Matuszczyk
  * <https://github.com/Maccraft123/ayaled>
  */
 #define pr_fmt(fmt) KBUILD_MODNAME ": " fmt
@@ -46,33 +46,32 @@ static bool unlock_global_acpi_lock(void)
 #define AYANEO_DATA_PORT         0x4f
 #define AYANEO_HIGH_BYTE         0xd1
 
-/* RGB LED EC Ram Registers */
-/*
-#define AYANEO_LED_MC_L_Q1_R     0xb3
-#define AYANEO_LED_MC_L_Q1_G     0xb4
-#define AYANEO_LED_MC_L_Q1_B     0xb5
-#define AYANEO_LED_MC_L_Q2_R     0xb6
-#define AYANEO_LED_MC_L_Q2_G     0xb7
-#define AYANEO_LED_MC_L_Q2_B     0xb8
-#define AYANEO_LED_MC_L_Q3_R     0xb9
-#define AYANEO_LED_MC_L_Q3_G     0xba
-#define AYANEO_LED_MC_L_Q3_B     0xbb
-#define AYANEO_LED_MC_L_Q4_R     0xbc
-#define AYANEO_LED_MC_L_Q4_G     0xbd
-#define AYANEO_LED_MC_L_Q4_B     0xbe
-#define AYANEO_LED_MC_R_Q1_R     0x73
-#define AYANEO_LED_MC_R_Q1_G     0x74
-#define AYANEO_LED_MC_R_Q1_B     0x75
-#define AYANEO_LED_MC_R_Q2_R     0x76
-#define AYANEO_LED_MC_R_Q2_G     0x77
-#define AYANEO_LED_MC_R_Q2_B     0x78
-#define AYANEO_LED_MC_R_Q3_R     0x79
-#define AYANEO_LED_MC_R_Q3_G     0x7a
-#define AYANEO_LED_MC_R_Q3_B     0x7b
-#define AYANEO_LED_MC_R_Q4_R     0x7c
-#define AYANEO_LED_MC_R_Q4_G     0x7d
-#define AYANEO_LED_MC_R_Q4_B     0x7e
-*/
+/* RGB LED EC Ram Registers
+ * #define AYANEO_LED_MC_L_Q1_R     0xb3
+ * #define AYANEO_LED_MC_L_Q1_G     0xb4
+ * #define AYANEO_LED_MC_L_Q1_B     0xb5
+ * #define AYANEO_LED_MC_L_Q2_R     0xb6
+ * #define AYANEO_LED_MC_L_Q2_G     0xb7
+ * #define AYANEO_LED_MC_L_Q2_B     0xb8
+ * #define AYANEO_LED_MC_L_Q3_R     0xb9
+ * #define AYANEO_LED_MC_L_Q3_G     0xba
+ * #define AYANEO_LED_MC_L_Q3_B     0xbb
+ * #define AYANEO_LED_MC_L_Q4_R     0xbc
+ * #define AYANEO_LED_MC_L_Q4_G     0xbd
+ * #define AYANEO_LED_MC_L_Q4_B     0xbe
+ * #define AYANEO_LED_MC_R_Q1_R     0x73
+ * #define AYANEO_LED_MC_R_Q1_G     0x74
+ * #define AYANEO_LED_MC_R_Q1_B     0x75
+ * #define AYANEO_LED_MC_R_Q2_R     0x76
+ * #define AYANEO_LED_MC_R_Q2_G     0x77
+ * #define AYANEO_LED_MC_R_Q2_B     0x78
+ * #define AYANEO_LED_MC_R_Q3_R     0x79
+ * #define AYANEO_LED_MC_R_Q3_G     0x7a
+ * #define AYANEO_LED_MC_R_Q3_B     0x7b
+ * #define AYANEO_LED_MC_R_Q4_R     0x7c
+ * #define AYANEO_LED_MC_R_Q4_G     0x7d
+ * #define AYANEO_LED_MC_R_Q4_B     0x7e
+ */
 
 #define AYANEO_LED_MC_ADDR_L          0xb0
 #define AYANEO_LED_MC_ADDR_R          0x70
@@ -85,35 +84,21 @@ static bool unlock_global_acpi_lock(void)
 #define AYANEO_LED_MC_MODE_RELEASE    0x00
 
 /* Schema:
-#
-# 0x6d - LED PWM control (0x03)
-#
-# 0xb1 - Support for 4 zones and RGB color
-#
-#   RGB colors:
-#
-#   1 - Red
-#   2 - Green
-#   3 - Blue
-#
-#   Zones:
-#
-#   Right (2), Down (5), Left (8) , Up (11)
-#
-#   Note: Set 0xb1 to 02 for off.
-#
-# 0xb2 - Sets brightness, requires b1 to be set at the same time.
-#
-#   00-ff - brightness from 0-255.  Not noticeable to me above 128.
-#
-# 0xbf - Set expected mode
-#
-#   0x10 - Enable
-#   0xe2 - Tint (+ Red for Purple, + Green for Teal)
-#   0xe3-0xe5 - Tint + blink (unused)
-#
-#   0xff - Close channel
-*/
+ *
+ * 0x6d - LED PWM control (0x03)
+ *
+ * 0xb1 - Support for 4 zones and RGB color
+ *   Colors: Red (1), Green (2), Blue (3)
+ *   Zones:  Right (2), Down (5), Left (8) , Up (11)
+ *   Off: Set 0xb1 to 02
+ *
+ * 0xb2 - Brightness [0-255]. Left/Right produce different brightness for
+ * 	 the same value on different models, must be scaled. Requires b1
+ * 	 to be set at the same time.
+ *
+ * 0xbf - Set Mode
+ *   Modes: Enable (0x10), Tint (0xe2), Close (0xff)
+ */
 
 /* EC Controlled RGB registers */
 #define AYANEO_LED_PWM_CONTROL        0x6d
@@ -148,7 +133,7 @@ static bool unlock_global_acpi_lock(void)
 
 #define AYANEO_LED_GROUP_LEFT         0x01
 #define AYANEO_LED_GROUP_RIGHT        0x02
-#define AYANEO_LED_GROUP_LEFT_RIGHT   0x03
+#define AYANEO_LED_GROUP_LEFT_RIGHT   0x03 /* omit for aya flip when implemented */
 #define AYANEO_LED_GROUP_BUTTON       0x04
 
 #define AYANEO_LED_WRITE_DELAY_LEGACY_MS        2
@@ -282,7 +267,7 @@ static int ec_write_ram(u8 index, u8 val)
         if (!lock_global_acpi_lock())
                 return -EBUSY;
 
-        outb(0x2e, AYANEO_ADDR_PORT);
+	outb(0x2e, AYANEO_ADDR_PORT);
         outb(0x11, AYANEO_DATA_PORT);
         outb(0x2f, AYANEO_ADDR_PORT);
         outb(AYANEO_HIGH_BYTE, AYANEO_DATA_PORT);
@@ -302,39 +287,39 @@ static int ec_write_ram(u8 index, u8 val)
 }
 
 /* Function Summary
-# AyaNeo devices can be largely divided into 2 groups; modern and legacy.
-# - Legacy devices use a microcontroller either embedded into or controlled via
-# the system's ACPI controller.
-# - Modern devices use a dedicated microcontroller and communicate via shared
-# memory.
-#
-# The control scheme is largely shared between the 2 device types and many of
-# the command values are shared.
-#
-# ayaneo_led_mc_set / ayaneo_led_mc_legacy_set
-#       Sets the value of a single address or subpixel
-#
-# ayaneo_led_mc_release / ayaneo_led_mc_legacy_release
-#       Releases control of the LEDs back to the microcontroller.
-#       This function is abstracted by ayaneo_led_mc_release_control.
-#
-# ayaneo_led_mc_hold / ayaneo_led_mc_legacy_hold
-#       Takes and holds control of the LEDs from the microcontroller.
-#       This function is abstracted by ayaneo_led_mc_take_control.
-#
-# ayaneo_led_mc_intensity / ayaneo_led_mc_legacy_intensity
-#       Sets the values of all of the LEDs in the zones of a given group.
-#
-# ayaneo_led_mc_off / ayaneo_led_mc_legacy_off
-#       Instructs the microcontroller to disable output for the given group.
-#
-# ayaneo_led_mc_on / ayaneo_led_mc_legacy_on
-#       Instructs the microcontroller to enable output for the given group.
-#
-# ayaneo_led_mc_reset / ayaneo_led_mc_legacy_reset
-#       Reverts all of the microcontroller internal registers to power on
-#       defaults.
-*/
+ * AYANEO devices can be largely divided into 2 groups; modern and legacy.
+ *   - Legacy devices use a microcontroller either embedded into or controlled via
+ *     the system's ACPI controller.
+ *   - Modern devices use a dedicated microcontroller and communicate via shared
+ *     memory.
+ *
+ * The control scheme is largely shared between both device types and many of
+ * the command values are shared.
+ *
+ * ayaneo_led_mc_set / ayaneo_led_mc_legacy_set
+ *       Sets the value of a single address or subpixel
+ *
+ * ayaneo_led_mc_release / ayaneo_led_mc_legacy_release
+ *       Releases control of the LEDs back to the microcontroller.
+ *       This function is abstracted by ayaneo_led_mc_release_control.
+ *
+ * ayaneo_led_mc_hold / ayaneo_led_mc_legacy_hold
+ *       Takes and holds control of the LEDs from the microcontroller.
+ *       This function is abstracted by ayaneo_led_mc_take_control.
+ *
+ * ayaneo_led_mc_intensity / ayaneo_led_mc_legacy_intensity
+ *       Sets the values of all of the LEDs in the zones of a given group.
+ *
+ * ayaneo_led_mc_off / ayaneo_led_mc_legacy_off
+ *       Instructs the microcontroller to disable output for the given group.
+ *
+ * ayaneo_led_mc_on / ayaneo_led_mc_legacy_on
+ *       Instructs the microcontroller to enable output for the given group.
+ *
+ * ayaneo_led_mc_reset / ayaneo_led_mc_legacy_reset
+ *       Reverts all of the microcontroller internal registers to power on
+ *       defaults.
+ */
 
 /* Dedicated microcontroller methods */
 static void ayaneo_led_mc_set(u8 group, u8 pos, u8 brightness)
@@ -380,7 +365,6 @@ static void ayaneo_led_mc_intensity(u8 group, u8 *color, u8 zones[])
                 ayaneo_led_mc_set(group, zones[zone] + 2, color[2]);
         }
 
-        // note: omit for aya flip when implemented, causes unexpected behavior
         ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT_RIGHT, 0x00, 0x00);
 }
 
@@ -391,7 +375,6 @@ static void ayaneo_led_mc_off(void)
         ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT,
                 AYANEO_LED_CMD_ENABLE_ADDR, AYANEO_LED_CMD_ENABLE_OFF);
 
-        // note: omit for aya flip when implemented, causes unexpected behavior
         ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT_RIGHT, 0x00, 0x00);
 }
 
@@ -412,7 +395,7 @@ static void ayaneo_led_mc_on(void)
         ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT,
                 AYANEO_LED_CMD_FADE_ADDR, AYANEO_LED_CMD_FADE_OFF);
 
-        // Set static color animation
+        /* Set static color animation */
         ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT,
                 AYANEO_LED_CMD_ANIM_1_ADDR, AYANEO_LED_CMD_ANIM_STATIC);
         ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT,
@@ -435,7 +418,6 @@ static void ayaneo_led_mc_on(void)
         ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT,
                 AYANEO_LED_CMD_WATCHDOG_ADDR, AYANEO_LED_CMD_WATCHDOG_ON);
 
-        // note: omit for aya flip when implemented, causes unexpected behavior
         ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT_RIGHT, 0x00, 0x00);
 }
 
@@ -446,7 +428,6 @@ static void ayaneo_led_mc_reset(void)
         ayaneo_led_mc_set(AYANEO_LED_GROUP_RIGHT,
                 AYANEO_LED_CMD_ENABLE_ADDR, AYANEO_LED_CMD_ENABLE_RESET);
 
-        // note: omit for aya flip when implemented, causes unexpected behavior
         ayaneo_led_mc_set(AYANEO_LED_GROUP_LEFT_RIGHT, 0x00, 0x00);
 }
 
@@ -512,7 +493,6 @@ static void ayaneo_led_mc_legacy_intensity(u8 group, u8 *color, u8 zones[])
                 ayaneo_led_mc_legacy_intensity_single(group, color, zones[zone]);
         }
 
-        // note: omit for aya flip when implemented, causes unexpected behavior
         ayaneo_led_mc_legacy_set(AYANEO_LED_GROUP_LEFT_RIGHT, 0x00, 0x00);
 }
 
@@ -567,7 +547,6 @@ static void ayaneo_led_mc_legacy_off(void)
         ayaneo_led_mc_legacy_set(AYANEO_LED_GROUP_RIGHT,
                 AYANEO_LED_CMD_ENABLE_ADDR, AYANEO_LED_CMD_ENABLE_OFF);
 
-        // note: omit for aya flip when implemented, causes unexpected behavior
         ayaneo_led_mc_legacy_set(AYANEO_LED_GROUP_LEFT_RIGHT, 0x00, 0x00);
 }
 
@@ -649,31 +628,31 @@ static void ayaneo_led_mc_release_control(void)
 }
 
 /* Threaded writes:
-# The writer thread's job is to push updates to the physical LEDs as fast as
-# possible while allowing updates to the LED multi_intensity/brightness sysfs
-# attributes to return quickly.
-#
-# During multi_intensity/brightness set, the ayaneo_led_mc_update_color array
-# is updated with the target color and ayaneo_led_mc_update_required is
-# incremented by 1.
-#
-# When the writer thread begins its next loop, it copies the current values of
-# ayaneo_led_mc_update_required, and ayaneo_led_mc_update_color, after which
-# the new color is pushed to the microcontroller. After the color has been
-# pushed the writer thread subtracts the starting value from
-# ayaneo_led_mc_update_required. If any updates were pushed to
-# ayaneo_led_mc_update_required during the writes then the following iteration
-# will immediately begin writing the new colors to the microcontroller,
-# otherwise it'll sleep for a short while.
-#
-# Updates to ayaneo_led_mc_update_required and ayaneo_led_mc_update_color are
-# syncronised by ayaneo_led_mc_update_lock to prevent a race condition between
-# the writer thread and the brightness set function.
-#
-# During suspend kthread_stop is called which causes the writer thread to
-# terminate after its current iteration. The writer thread is restarted during
-# resume to allow updates to continue.
-*/
+ *  The writer thread's job is to push updates to the physical LEDs as fast as
+ *  possible while allowing updates to the LED multi_intensity/brightness sysfs
+ *  attributes to return quickly.
+ *
+ *  During multi_intensity/brightness set, the ayaneo_led_mc_update_color array
+ *  is updated with the target color and ayaneo_led_mc_update_required is
+ *  incremented by 1.
+ *
+ *  When the writer thread begins its next loop, it copies the current values of
+ *  ayaneo_led_mc_update_required, and ayaneo_led_mc_update_color, after which
+ *  the new color is pushed to the microcontroller. After the color has been
+ *  pushed the writer thread subtracts the starting value from
+ *  ayaneo_led_mc_update_required. If any updates were pushed to
+ *  ayaneo_led_mc_update_required during the writes then the following iteration
+ *  will immediately begin writing the new colors to the microcontroller,
+ *  otherwise it'll sleep for a short while.
+ *
+ *  Updates to ayaneo_led_mc_update_required and ayaneo_led_mc_update_color are
+ *  syncronised by ayaneo_led_mc_update_lock to prevent a race condition between
+ *  the writer thread and the brightness set function.
+ *
+ *  During suspend kthread_stop is called which causes the writer thread to
+ *  terminate after its current iteration. The writer thread is restarted during
+ *  resume to allow updates to continue.
+ */
 static struct task_struct *ayaneo_led_mc_writer_thread;
 static int ayaneo_led_mc_update_required;
 static u8 ayaneo_led_mc_update_color[3];
@@ -695,9 +674,9 @@ static void ayaneo_led_mc_scale_color(u8 *color, u8 max_value)
 
 static void ayaneo_led_mc_brightness_apply(u8 *color)
 {
-        u8 color_l[3];
-        u8 color_r[3];
-        u8 color_b[3];
+        u8 color_l[3]; /* Left joystick ring */
+        u8 color_r[3]; /* Right joystick ring */
+        u8 color_b[3]; /* AyaSpace Button (KUN Only) */
 
         u8 zones[4] = {3, 6, 9, 12};
 
@@ -888,7 +867,6 @@ static DEVICE_ATTR_RW(suspend_mode);
 
 static struct attribute *ayaneo_led_mc_attrs[] = {
         NULL,
-        NULL,
 };
 
 static void suspend_mode_register_attr(void)
@@ -904,8 +882,6 @@ static void suspend_mode_register_attr(void)
                 case ayaneo_2:
                 case ayaneo_2s:
                 case kun:
-                        ayaneo_led_mc_attrs[0] = &dev_attr_suspend_mode.attr;
-                        break;
                 case air_plus:
                 case slide:
                         ayaneo_led_mc_attrs[0] = &dev_attr_suspend_mode.attr;
@@ -940,7 +916,7 @@ struct mc_subled ayaneo_led_mc_subled_info[] = {
 
 struct led_classdev_mc ayaneo_led_mc = {
         .led_cdev = {
-                .name = "multicolor:chassis",
+                .name = "ayaneo:rgb:joystick_rings",
                 .brightness = 0,
                 .max_brightness = 255,
                 .brightness_set = ayaneo_led_mc_brightness_set,
@@ -954,11 +930,12 @@ static int ayaneo_platform_resume(struct platform_device *pdev)
 {
         ayaneo_led_mc_take_control();
 
+	/* Re-apply last color */
         write_lock(&ayaneo_led_mc_update_lock);
         ayaneo_led_mc_update_required++;
         write_unlock(&ayaneo_led_mc_update_lock);
 
-        // Allow the MCU to sync with the new state.
+        /* Allow the MCU to sync with the new state */
         msleep(AYANEO_LED_SUSPEND_RESUME_DELAY_MS);
 
         ayaneo_led_mc_writer_thread = kthread_run(ayaneo_led_mc_writer,
@@ -989,7 +966,7 @@ static int ayaneo_platform_suspend(struct platform_device *pdev, pm_message_t st
                 break;
         }
 
-        // Allow the MCU to sync with the new state.
+        /* Allow the MCU to sync with the new state */
         msleep(AYANEO_LED_SUSPEND_RESUME_DELAY_MS);
 
         return 0;
