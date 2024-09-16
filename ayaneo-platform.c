@@ -869,6 +869,10 @@ static struct attribute *ayaneo_led_mc_attrs[] = {
         NULL,
 };
 
+static struct attribute_group ayaneo_led_mc_group = {
+      .attrs = ayaneo_led_mc_attrs,
+};
+
 static void suspend_mode_register_attr(void)
 {
         switch (model) {
@@ -890,8 +894,6 @@ static void suspend_mode_register_attr(void)
                         break;
         }
 }
-
-ATTRIBUTE_GROUPS(ayaneo_led_mc);
 
 struct mc_subled ayaneo_led_mc_subled_info[] = {
         {
@@ -991,7 +993,7 @@ static int ayaneo_platform_probe(struct platform_device *pdev)
         if (ret)
                 return ret;
 
-        ret = devm_device_add_group(ayaneo_led_mc.led_cdev.dev, *ayaneo_led_mc_groups);
+        ret = devm_device_add_group(ayaneo_led_mc.led_cdev.dev, &ayaneo_led_mc_group);
         return ret;
 }
 
