@@ -716,7 +716,6 @@ static void ayaneo_led_mc_brightness_apply(u8 *color)
                 case air:
                 case air_pro:
                 case air_1s:
-                        //ayaneo_led_mc_scale_color(color_l, 69);
                         ayaneo_led_mc_legacy_on();
                         ayaneo_led_mc_legacy_intensity(AYANEO_LED_GROUP_LEFT, color_l, zones);
                         ayaneo_led_mc_legacy_intensity(AYANEO_LED_GROUP_RIGHT, color_r, zones);
