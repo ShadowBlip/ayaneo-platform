@@ -1016,7 +1016,7 @@ static struct platform_driver ayaneo_platform_driver = {
         .resume = ayaneo_platform_resume,
         .suspend = ayaneo_platform_suspend,
         .shutdown = ayaneo_platform_shutdown,
-        .remove_new = ayaneo_platform_remove,
+        .remove = ayaneo_platform_remove,
 };
 
 static struct platform_device *ayaneo_platform_device;
