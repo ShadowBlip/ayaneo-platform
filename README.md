@@ -1,6 +1,7 @@
 # Platform driver for AYANEO x86 handhelds
 
 This driver provides a sysfs interface for RGB control.
+And also a sysfs interface for bypass charge.
 
 Supported devices include:
 
@@ -49,7 +50,7 @@ $ make
 
 LED color and brightness can be controlled via sysfs.
 
-On most systems this will be mounted at `/sys/class/leds/multicolor:chassis/` and provides the following files:
+On most systems this will be mounted at `/sys/class/leds/ayaneo:rgb:joystick_rings/` and provides the following files:
 
 #### `brightness`
 
@@ -97,18 +98,73 @@ Default is "oem".
 
 The current brightness and color can be retrieved as follows:
 ```shell
-$ cat /sys/class/leds/multicolor:chassis/brightness
+$ cat /sys/class/leds/ayaneo:rgb:joystick_rings/brightness
 0
-$ cat /sys/class/leds/multicolor:chassis/multi_intensity
+$ cat /sys/class/leds/ayaneo:rgb:joystick_rings/multi_intensity
 0 0 0
 ```
 
 New values can be set as follows:
 ```shell
-$ echo "255" | sudo tee /sys/class/leds/multicolor:chassis/brightness
+$ echo "255" | sudo tee /sys/class/leds/ayaneo:rgb:joystick_rings/brightness
 255
-$ echo "255 0 128" | sudo tee /sys/class/leds/multicolor:chassis/multi_intensity
+$ echo "255 0 128" | sudo tee /sys/class/leds/ayaneo:rgb:joystick_rings/multi_intensity
 255 0 128
+```
+
+### Bypass Charge Control
+
+Bypass Charge Control can be enabled, disabled, start and stop battery level can be set via sysfs.
+
+On most systems this will be mounted/hooked at `/sys/class/power_supply/BAT0/` and provides the following files:
+
+#### charge_type
+
+Read/write.
+
+Enables or disables the bypass charge. Accepts a value of "Standard", "Cycle" and "Bypass".
+When reading, the currently selected option will be wrapped in square brackets `[ ]`.
+
+|Value|Description|
+|-|-|
+|"Standard"|Disables the bypass charge. The battery is normally charged.|
+|"Cycle"|Enables the bypass charge. Battery charging will depend on the start and stop values.|
+|"Bypass"|Enables the bypass charge regardless the battery level.|
+
+Default is "Standard"
+
+#### charge_control_start_threshold
+
+Read/write.
+
+Gets or sets the battery percentage level, below which charging will begin. Valid values between 0 and 100 (percent).
+
+Default is 100.
+
+#### charge_control_end_threshold
+
+Read/write.
+
+Gets or sets the battery percentage level, on or above which charging will stop. Valid values between 0 and 100 (percent).
+
+Default is 100.
+
+#### Identifying and Setting Control Values
+
+The current charge type and end threshold can be retrieved as follows:
+```shell
+$ cat /sys/class/power_supply/ayaneo:bypass_charge/charge_type
+[Standard] Cycle Bypass
+$ cat /sys/class/power_supply/ayaneo:bypass_charge/charge_control_end_threshold
+100
+```
+
+New values can be set as follows:
+```shell
+$ echo "Cycle" | sudo tee /sys/class/power_supply/ayaneo:bypass_charge/charge_type
+Cycle
+$ echo "80" | sudo tee /sys/class/power_supply/ayaneo:bypass_charge/charge_control_end_threshold
+80
 ```
 
 ## Changing Startup Defaults
@@ -116,10 +172,10 @@ The platform driver is fully exposed over systemd udev. This can be used to writ
 
 ### Udev Attributes Tree
 ```shell
-$ udevadm info --attribute-walk /sys/class/leds/multicolor:chassis
+$ udevadm info --attribute-walk /sys/class/leds/ayaneo:rgb:joystick_rings
 
-  looking at device '/devices/platform/ayaneo-platform/leds/multicolor:chassis':
-    KERNEL=="multicolor:chassis"
+  looking at device '/devices/platform/ayaneo-platform/leds/ayaneo:rgb:joystick_rings':
+    KERNEL=="ayaneo:rgb:joystick_rings"
     SUBSYSTEM=="leds"
     DRIVER==""
     ATTR{brightness}=="0"
@@ -158,7 +214,7 @@ $ udevadm info --attribute-walk /sys/class/leds/multicolor:chassis
 You can store a udev rule as `/etc/udev/rules.d/##-rule_name.rules`
 
 All rules will start like this:
-`ACTION=="add|change", KERNEL=="multicolor:chassis", SUBSYSTEM=="leds"`
+`ACTION=="add|change", KERNEL=="ayaneo:rgb:joystick_rings", SUBSYSTEM=="leds"`
 
 To define a default, add the attribute in the format `ATTR{name}=value`
 Valid attributes are:
@@ -169,10 +225,10 @@ ATTR{suspend_mode}=="[oem|keep|off]"
 ```
 
 As en example, to set `suspend_mode`to `off`:
-`ACTION=="add|change", KERNEL=="multicolor:chassis", SUBSYSTEM=="leds", ATTR{suspend_mode}="off"
+`ACTION=="add|change", KERNEL=="ayaneo:rgb:joystick_rings", SUBSYSTEM=="leds", ATTR{suspend_mode}="off"
 `
 
 to create the rule in one line:
 ```shell
-$ echo 'ACTION=="add|change", KERNEL=="multicolor:chassis", SUBSYSTEM=="leds", ATTR{suspend_mode}="off"' | sudo tee /etc/udev/rules.d/99-led_suspend_mode.rules
+$ echo 'ACTION=="add|change", KERNEL=="ayaneo:rgb:joystick_rings", SUBSYSTEM=="leds", ATTR{suspend_mode}="off"' | sudo tee /etc/udev/rules.d/99-led_suspend_mode.rules
 ```
