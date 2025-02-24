@@ -5,7 +5,7 @@
  *
  * Copyright (C) 2023-2024 Derek J. Clark <derekjohn.clark@gmail.com>
  * Copyright (C) 2023-2024 JELOS <https://github.com/JustEnoughLinuxOS>
- * Copyright (C) 2024 Sebastian Kranz <https://github.com/Lightwars>
+ * Copyright (C) 2024, 2025 Sebastian Kranz <https://github.com/Lightwars>
  * Copyright (C) 2024 Trevor Heslop <https://github.com/SytheZN>
  * Derived from ayaled originally developed by Maya Matuszczyk
  * <https://github.com/Maccraft123/ayaled>
@@ -25,6 +25,7 @@
 #include <linux/pm.h>
 #include <linux/platform_device.h>
 #include <linux/processor.h>
+#include <acpi/battery.h>
 
 /* Handle ACPI lock mechanism */
 static u32 ayaneo_mutex;
@@ -83,6 +84,11 @@ static bool unlock_global_acpi_lock(void)
 #define AYANEO_LED_MC_MODE_HOLD       0xa5
 #define AYANEO_LED_MC_MODE_RELEASE    0x00
 
+/* Bypass Charge EC Ram Registers */
+#define AYANEO_BYPASSCHARGE_CONTROL 0xd1
+#define AYANEO_BYPASSCHARGE_OPEN    0x01
+#define AYANEO_BYPASSCHARGE_CLOSE   0x65
+
 /* Schema:
  *
  * 0x6d - LED PWM control (0x03)
@@ -93,8 +99,8 @@ static bool unlock_global_acpi_lock(void)
  *   Off: Set 0xb1 to 02
  *
  * 0xb2 - Brightness [0-255]. Left/Right produce different brightness for
- * 	 the same value on different models, must be scaled. Requires b1
- * 	 to be set at the same time.
+ *   the same value on different models, must be scaled. Requires b1
+ *   to be set at the same time.
  *
  * 0xbf - Set Mode
  *   Modes: Enable (0x10), Tint (0xe2), Close (0xff)
@@ -140,6 +146,13 @@ static bool unlock_global_acpi_lock(void)
 #define AYANEO_LED_WRITE_DELAY_MS               1
 #define AYANEO_LED_WRITER_DELAY_RANGE_US        10000, 20000
 #define AYANEO_LED_SUSPEND_RESUME_DELAY_MS      100
+
+/* EC Controlled Bypass Charge Register */
+#define AYANEO_BYPASS_CHARGE_CONTROL  0x1e
+#define AYANEO_BYPASS_CHARGE_OPEN     0x55
+#define AYANEO_BYPASS_CHARGE_CLOSE    0xaa
+#define AYANEO_BYPASS_WRITER_DELAY_MS 30000
+#define AYANEO_EC_VERSION_REG 0x00 /* until 0x04 */
 
 enum ayaneo_model {
         air = 1,
@@ -250,7 +263,7 @@ static const struct dmi_system_id dmi_table[] = {
                 },
                 .driver_data = (void *)kun,
         },
-	{
+    {
                 .matches = {
                         DMI_EXACT_MATCH(DMI_BOARD_VENDOR, "AYANEO"),
                         DMI_EXACT_MATCH(DMI_BOARD_NAME, "AS01"),
@@ -267,7 +280,7 @@ static int ec_write_ram(u8 index, u8 val)
         if (!lock_global_acpi_lock())
                 return -EBUSY;
 
-	outb(0x2e, AYANEO_ADDR_PORT);
+        outb(0x2e, AYANEO_ADDR_PORT);
         outb(0x11, AYANEO_DATA_PORT);
         outb(0x2f, AYANEO_ADDR_PORT);
         outb(AYANEO_HIGH_BYTE, AYANEO_DATA_PORT);
@@ -279,6 +292,32 @@ static int ec_write_ram(u8 index, u8 val)
         outb(0x12, AYANEO_DATA_PORT);
         outb(0x2f, AYANEO_ADDR_PORT);
         outb(val, AYANEO_DATA_PORT);
+
+        if (!unlock_global_acpi_lock())
+                return -EBUSY;
+
+        return ret;
+}
+
+static int ec_read_ram(u8 index, u8 *val)
+{
+        int ret;
+
+        if (!lock_global_acpi_lock())
+                return -EBUSY;
+
+        outb(0x2e, AYANEO_ADDR_PORT);
+        outb(0x11, AYANEO_DATA_PORT);
+        outb(0x2f, AYANEO_ADDR_PORT);
+        outb(AYANEO_HIGH_BYTE, AYANEO_DATA_PORT);
+        outb(0x2e, AYANEO_ADDR_PORT);
+        outb(0x10, AYANEO_DATA_PORT);
+        outb(0x2f, AYANEO_ADDR_PORT);
+        outb(index, AYANEO_DATA_PORT);
+        outb(0x2e, AYANEO_ADDR_PORT);
+        outb(0x12, AYANEO_DATA_PORT);
+        outb(0x2f, AYANEO_ADDR_PORT);
+        *val = inb(AYANEO_DATA_PORT);
 
         if (!unlock_global_acpi_lock())
                 return -EBUSY;
@@ -927,11 +966,429 @@ struct led_classdev_mc ayaneo_led_mc = {
         .subled_info = ayaneo_led_mc_subled_info,
 };
 
+/* Handling bypass charge */
+enum charge_type_value_index {
+    CHARGETYPE_STANDARD, CHARGETYPE_CYCLE, CHARGETYPE_BYPASS,
+};
+static const char * const charge_type_strings[] = {
+    [CHARGETYPE_STANDARD] = "Standard",
+    [CHARGETYPE_CYCLE] = "Cycle",
+    [CHARGETYPE_BYPASS] = "Bypass",
+};
+struct ayaneo_ps_priv {
+    u8 charge_type;
+    u8 current_start_threshold;
+    u8 current_end_threshold;
+    u8 bypass_available;
+};
+static struct ayaneo_ps_priv ps_priv = { CHARGETYPE_STANDARD, 100, 100, 0 };
+
+static ssize_t charge_type_show(struct device *dev,
+                  struct device_attribute *attr, char *buf)
+{
+    bool active;
+    ssize_t count = 0;
+    int i;
+
+    for (i = 0; i <  ARRAY_SIZE(charge_type_strings); i++) {
+            active = i == ps_priv.charge_type;
+            if (active) {
+                    count += sysfs_emit_at(buf, count, "[%s] ",
+                               charge_type_strings[i]);
+            }
+            else {
+                    count += sysfs_emit_at(buf, count, "%s ",
+                               charge_type_strings[i]);
+            }
+    }
+
+    if (count)
+        buf[count - 1] = '\n';
+
+    return count;
+}
+
+static ssize_t charge_type_store(struct device *dev,
+                   struct device_attribute *attr, const char *buf,
+                   size_t count)
+{
+    int ret;
+    ret = __sysfs_match_string(charge_type_strings, ARRAY_SIZE(charge_type_strings), buf);
+    if (ret < 0)
+        return ret;
+
+    ps_priv.charge_type = ret;
+    return count;
+}
+
+static DEVICE_ATTR_RW(charge_type);
+
+static ssize_t charge_control_end_threshold_store(struct device *dev,
+                   struct device_attribute *attr, const char *buf,
+                   size_t count)
+{
+    u64 val;
+    int ret;
+
+    ret = kstrtou64(buf, 10, &val);
+    if (ret < 0)
+        return ret;
+
+    if (val < 0 || val > 100) {
+        ret = -EINVAL;
+    } else if (val < ps_priv.current_start_threshold) {
+        ret = -EINVAL;
+    } else {
+        ps_priv.current_end_threshold = val;
+    }
+
+    return count;
+}
+
+static ssize_t charge_control_end_threshold_show(struct device *dev,
+                  struct device_attribute *attr, char *buf)
+{
+    return sysfs_emit(buf, "%d\n", ps_priv.current_end_threshold);
+}
+
+static DEVICE_ATTR_RW(charge_control_end_threshold);
+
+static ssize_t charge_control_start_threshold_store(struct device *dev,
+                   struct device_attribute *attr, const char *buf,
+                   size_t count)
+{
+    u64 val;
+    int ret;
+
+    ret = kstrtou64(buf, 10, &val);
+    if (ret < 0)
+        return ret;
+
+    if (val < 0 || val > 100) {
+        ret = -EINVAL;
+    } else if (val > ps_priv.current_end_threshold) {
+        ret = -EINVAL;
+    } else {
+        ps_priv.current_start_threshold = val;
+    }
+
+    return count;
+}
+
+static ssize_t charge_control_start_threshold_show(struct device *dev,
+                  struct device_attribute *attr, char *buf)
+{
+    return sysfs_emit(buf, "%d\n", ps_priv.current_start_threshold);
+}
+
+static DEVICE_ATTR_RW(charge_control_start_threshold);
+
+/* Function Summary
+ * AYANEO devices can be largely divided into 2 groups; modern and legacy.
+ *   - Legacy devices use a microcontroller either embedded into or controlled via
+ *     the system's ACPI controller.
+ *   - Modern devices use a dedicated microcontroller and communicate via shared
+ *     memory.
+ *
+ * The control scheme is largely shared between both device types and many of
+ * the command values are shared.
+ *
+ * ayaneo_bypass_charge_open / ayaneo_bypass_charge_legacy_open
+ *       Bypasses the charging of the battery and supplies power directly to 
+ *       the hardware.
+ *
+ * ayaneo_bypass_charge_close / ayaneo_bypass_charge_legacy_close
+ *       Renable the charging of the battery.
+ */
+static void ayaneo_bypass_charge_open(void)
+{
+    u8 val;
+    ec_read_ram(AYANEO_BYPASSCHARGE_CONTROL, &val);
+    if(val != AYANEO_BYPASSCHARGE_OPEN) {
+        ec_write_ram(AYANEO_BYPASSCHARGE_CONTROL, AYANEO_BYPASSCHARGE_OPEN);
+    }
+}
+
+static void ayaneo_bypass_charge_close(void)
+{
+    u8 val;
+    ec_read_ram(AYANEO_BYPASSCHARGE_CONTROL, &val);
+    if(val != AYANEO_BYPASSCHARGE_CLOSE) {
+        ec_write_ram(AYANEO_BYPASSCHARGE_CONTROL, AYANEO_BYPASSCHARGE_CLOSE);
+    }
+}
+
+static void ayaneo_bypass_charge_legacy_open(void)
+{
+    u8 val;
+        if (!lock_global_acpi_lock())
+                return;
+
+    if(ec_read(AYANEO_BYPASS_CHARGE_CONTROL, &val) == 0) {
+            if(val != AYANEO_BYPASS_CHARGE_OPEN) {
+                ec_write(AYANEO_BYPASS_CHARGE_CONTROL, AYANEO_BYPASS_CHARGE_OPEN);
+        }
+    }
+
+        if (!unlock_global_acpi_lock())
+                return;
+}
+
+static void ayaneo_bypass_charge_legacy_close(void)
+{
+    u8 val;
+        if (!lock_global_acpi_lock())
+                return;
+
+    if(ec_read(AYANEO_BYPASS_CHARGE_CONTROL, &val) == 0) {
+            if(val != AYANEO_BYPASS_CHARGE_CLOSE) {
+                ec_write(AYANEO_BYPASS_CHARGE_CONTROL, AYANEO_BYPASS_CHARGE_CLOSE);
+            }
+    }
+
+        if (!unlock_global_acpi_lock())
+                return;
+}
+/* Threaded writes:
+ *  The writer thread's job is to enable or disable the bypass charge function
+ *  depending on the POWER_SUPPLY_PROP_CHARGE_CONTROL_START_THRESHOLD,
+ *  POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD and POWER_SUPPLY_PROP_CHARGE_TYPE.
+ *
+ *  When the writer thread begins its next loop, it checks if it should activate the
+ *  bypass charge if POWER_SUPPLY_CHARGE_TYPE_CUSTOM is set. Then it probes the battery
+ *  charge level to determine if battery charging is still allowed. It then saves the
+ *  state of charge type and sleeps for some seconds.
+ *
+ *  During suspend kthread_stop is called which causes the writer thread to
+ *  terminate after its current iteration. The writer thread is restarted during
+ *  resume to allow updates to continue.
+ */
+static struct task_struct *ayaneo_bypass_charge_writer_thread;
+int ayaneo_bypass_charge_writer(void *pv);
+int ayaneo_bypass_charge_writer(void *pv)
+{
+        char battery[]= "BAT0";
+        int ret = 0;
+        struct power_supply *psy = power_supply_get_by_name(battery);
+        union power_supply_propval capacity;
+        u8 last_charge_type = 0xff;
+        if(psy) {
+            pr_info("Bypass-Writer thread started.\n");
+
+            while (!kthread_should_stop())
+            {
+                if(last_charge_type != ps_priv.charge_type) {
+                    if(ps_priv.charge_type == CHARGETYPE_CYCLE) {
+                        ret = power_supply_get_property(psy, POWER_SUPPLY_PROP_CAPACITY, &capacity);
+                        if(!ret) {
+                            if(capacity.intval >= ps_priv.current_end_threshold) {
+                                switch (model) {
+                                    case air:
+                                    case air_1s:
+                                    case air_1s_limited:
+                                    case air_pro:
+                                    case air_plus_mendo:
+                                    case geek_1s:
+                                    case ayaneo_2s:
+                                    case kun:
+                                            ayaneo_bypass_charge_legacy_open();
+                                            break;
+                                    case air_plus:
+                                    case slide:
+                                            ayaneo_bypass_charge_open();
+                                            break;
+                                    default:
+                                            break;
+                                }
+                            } else if(capacity.intval < ps_priv.current_start_threshold) {
+                                switch (model) {
+                                    case air:
+                                    case air_1s:
+                                    case air_1s_limited:
+                                    case air_pro:
+                                    case air_plus_mendo:
+                                    case geek_1s:
+                                    case ayaneo_2s:
+                                    case kun:
+                                            ayaneo_bypass_charge_legacy_close();
+                                            break;
+                                    case air_plus:
+                                    case slide:
+                                            ayaneo_bypass_charge_close();
+                                            break;
+                                    default:
+                                            break;
+                                }
+                            }
+                        }
+                    } else if (CHARGETYPE_BYPASS == ps_priv.charge_type){
+                        switch (model) {
+                            case air:
+                            case air_1s:
+                            case air_1s_limited:
+                            case air_pro:
+                            case air_plus_mendo:
+                            case geek_1s:
+                            case ayaneo_2s:
+                            case kun:
+                                    ayaneo_bypass_charge_legacy_open();
+                                    break;
+                            case air_plus:
+                            case slide:
+                                    ayaneo_bypass_charge_open();
+                                    break;
+                            default:
+                                    break;
+                        }
+                    } else if (CHARGETYPE_STANDARD == ps_priv.charge_type){
+                        switch (model) {
+                            case air:
+                            case air_1s:
+                            case air_1s_limited:
+                            case air_pro:
+                            case air_plus_mendo:
+                            case geek_1s:
+                            case ayaneo_2s:
+                            case kun:
+                                    ayaneo_bypass_charge_legacy_close();
+                                    break;
+                            case air_plus:
+                            case slide:
+                                    ayaneo_bypass_charge_close();
+                                    break;
+                            default:
+                                    break;
+                        }
+                    }
+                    last_charge_type = ps_priv.charge_type;
+                }
+                msleep(AYANEO_BYPASS_WRITER_DELAY_MS);
+            }
+
+            pr_info("Bypass-Writer thread stopped.\n");
+        }
+        return 0;
+}
+
+static int ayaneo_battery_add(struct power_supply *battery, struct acpi_battery_hook *hook)
+{
+    /* Ayaneo devices only have one battery. */
+    if (strcmp(battery->desc->name, "BAT0") != 0)
+        return -ENODEV;
+
+    if (device_create_file(&battery->dev,
+        &dev_attr_charge_control_end_threshold))
+        return -ENODEV;
+
+    if (device_create_file(&battery->dev,
+        &dev_attr_charge_control_start_threshold)) {
+        device_remove_file(&battery->dev,
+                &dev_attr_charge_control_end_threshold);
+        return -ENODEV;
+    }
+
+    if (device_create_file(&battery->dev,
+        &dev_attr_charge_type)) {
+        device_remove_file(&battery->dev,
+                &dev_attr_charge_control_end_threshold);
+        device_remove_file(&battery->dev,
+                &dev_attr_charge_control_start_threshold);
+        return -ENODEV;
+    }
+
+    return 0;
+}
+
+static int ayaneo_battery_remove(struct power_supply *battery, struct acpi_battery_hook *hook)
+{
+    device_remove_file(&battery->dev,
+               &dev_attr_charge_control_start_threshold);
+    device_remove_file(&battery->dev,
+               &dev_attr_charge_control_end_threshold);
+    device_remove_file(&battery->dev,
+               &dev_attr_charge_type);
+    return 0;
+}
+
+static struct acpi_battery_hook battery_hook = {
+    .add_battery = ayaneo_battery_add,
+    .remove_battery = ayaneo_battery_remove,
+    .name = "Ayaneo Battery",
+};
+
+/* check the ec version of devices which can handle the bypass charge function */
+static int ayaneo_check_charge_control(void)
+{
+#define VERSION_LENGTH 5
+        int ret;
+        u8 version[VERSION_LENGTH];
+        u8 version_needed[VERSION_LENGTH];
+        u8 version_length = VERSION_LENGTH;
+        int index;
+        for(index = 0; index < VERSION_LENGTH; index++) {
+            ec_read(AYANEO_EC_VERSION_REG + index, &version[index]);
+        }
+        switch (model) {
+            case air:
+            case air_pro:
+                    version_needed[0] = 3;
+                    version_needed[1] = 1;
+                    version_needed[2] = 0;
+                    version_needed[3] = 4;
+                    version_needed[4] = 78;
+                    break;
+            case air_1s:
+			case air_1s_limited:
+                    version_needed[0] = 8;
+                    version_needed[1] = 4;
+                    version_needed[2] = 0;
+                    version_needed[3] = 0;
+                    version_needed[4] = 27;
+                    break;
+            case air_plus_mendo:
+                    version_needed[0] = 7;
+                    version_needed[1] = 0;
+                    version_needed[2] = 0;
+                    version_needed[3] = 0;
+                    version_needed[4] = 13;
+                    break;
+            case ayaneo_2s:
+            case geek_1s:
+                    version_needed[0] = 8;
+                    version_needed[1] = 0;
+                    version_needed[2] = 0;
+                    version_needed[3] = 1;
+                    version_needed[4] = 10;
+                    break;
+            case kun:
+                    version_needed[0] = 8;
+                    version_needed[1] = 3;
+                    version_needed[2] = 0;
+                    version_needed[3] = 0;
+                    version_needed[4] = 63;
+                    break;
+            case air_plus:
+            case slide:
+                    version_needed[0] = 0x1b;
+                    version_needed[1] = 0;
+                    version_needed[2] = 0;
+                    version_needed[3] = 0;
+                    version_needed[4] = 0;
+                    version_length = 1;
+                    break;
+            default:
+                    return -1;
+                    break;
+        }
+        ret = memcmp(version, version_needed, version_length);
+        return ret;
+}
+
 static int ayaneo_platform_resume(struct platform_device *pdev)
 {
         ayaneo_led_mc_take_control();
 
-	/* Re-apply last color */
+        /* Re-apply last color */
         write_lock(&ayaneo_led_mc_update_lock);
         ayaneo_led_mc_update_required++;
         write_unlock(&ayaneo_led_mc_update_lock);
@@ -942,6 +1399,11 @@ static int ayaneo_platform_resume(struct platform_device *pdev)
         ayaneo_led_mc_writer_thread = kthread_run(ayaneo_led_mc_writer,
                                                   NULL,
                                                   "ayaneo-platform led writer");
+        if(ps_priv.bypass_available) {
+            ayaneo_bypass_charge_writer_thread = kthread_run(ayaneo_bypass_charge_writer,
+                                                  NULL,
+                                                  "ayaneo-platform bypass charge writer");
+        }
         return 0;
 }
 
@@ -970,6 +1432,10 @@ static int ayaneo_platform_suspend(struct platform_device *pdev, pm_message_t st
         /* Allow the MCU to sync with the new state */
         msleep(AYANEO_LED_SUSPEND_RESUME_DELAY_MS);
 
+        if(ps_priv.bypass_available) {
+            kthread_stop(ayaneo_bypass_charge_writer_thread);
+        }
+
         return 0;
 }
 
@@ -993,6 +1459,12 @@ static int ayaneo_platform_probe(struct platform_device *pdev)
                 return ret;
 
         ret = devm_device_add_group(ayaneo_led_mc.led_cdev.dev, &ayaneo_led_mc_group);
+        if (ret)
+                return ret;
+
+        if(ayaneo_check_charge_control() >= 0) {
+            ps_priv.bypass_available = 1;
+        }
         return ret;
 }
 
@@ -1000,12 +1472,18 @@ static void ayaneo_platform_shutdown(struct platform_device *pdev)
 {
         kthread_stop(ayaneo_led_mc_writer_thread);
         ayaneo_led_mc_release_control();
+        if(ps_priv.bypass_available) {
+            kthread_stop(ayaneo_bypass_charge_writer_thread);
+        }
 }
 
 static void ayaneo_platform_remove(struct platform_device *pdev)
 {
         kthread_stop(ayaneo_led_mc_writer_thread);
         ayaneo_led_mc_release_control();
+        if(ps_priv.bypass_available) {
+            kthread_stop(ayaneo_bypass_charge_writer_thread);
+        }
 }
 
 static struct platform_driver ayaneo_platform_driver = {
@@ -1041,12 +1519,30 @@ static int __init ayaneo_platform_init(void)
                 return -1;
         }
 
+        if(ps_priv.bypass_available) {
+            battery_hook_register(&battery_hook);
+            ayaneo_bypass_charge_writer_thread = kthread_run(ayaneo_bypass_charge_writer,
+                                                  NULL,
+                                                  "ayaneo-platform bypass charge writer");
+
+            if (!ayaneo_bypass_charge_writer_thread)
+            {
+                    pr_err("Failed to start ps writer thread.\n");
+                    platform_device_unregister(ayaneo_platform_device);
+                    return -1;
+            }
+        }
+
         return 0;
 }
 
 static void __exit ayaneo_platform_exit(void)
 {
         kthread_stop(ayaneo_led_mc_writer_thread);
+        if(ps_priv.bypass_available) {
+            kthread_stop(ayaneo_bypass_charge_writer_thread);
+            battery_hook_unregister(&battery_hook);
+        }
         platform_device_unregister(ayaneo_platform_device);
         platform_driver_unregister(&ayaneo_platform_driver);
 }
