@@ -968,11 +968,11 @@ struct led_classdev_mc ayaneo_led_mc = {
 
 /* Handling bypass charge */
 enum charge_type_value_index {
-    CHARGETYPE_STANDARD, CHARGETYPE_CYCLE, CHARGETYPE_BYPASS,
+    CHARGETYPE_STANDARD, CHARGETYPE_LIMIT, CHARGETYPE_BYPASS,
 };
 static const char * const charge_type_strings[] = {
     [CHARGETYPE_STANDARD] = "Standard",
-    [CHARGETYPE_CYCLE] = "Cycle",
+    [CHARGETYPE_LIMIT] = "Limit",
     [CHARGETYPE_BYPASS] = "Bypass",
 };
 struct ayaneo_ps_priv {
@@ -980,6 +980,7 @@ struct ayaneo_ps_priv {
     u8 current_start_threshold;
     u8 current_end_threshold;
     u8 bypass_available;
+    struct power_supply *battery;
 };
 static struct ayaneo_ps_priv ps_priv = { CHARGETYPE_STANDARD, 100, 100, 0 };
 
@@ -1167,113 +1168,136 @@ static struct task_struct *ayaneo_bypass_charge_writer_thread;
 int ayaneo_bypass_charge_writer(void *pv);
 int ayaneo_bypass_charge_writer(void *pv)
 {
-        char battery[]= "BAT0";
         int ret = 0;
-        struct power_supply *psy = power_supply_get_by_name(battery);
         union power_supply_propval capacity;
         u8 last_charge_type = 0xff;
-        if(psy) {
-            pr_info("Bypass-Writer thread started.\n");
+        pr_info("Bypass-Writer thread started.\n");
 
-            while (!kthread_should_stop())
-            {
-                if(last_charge_type != ps_priv.charge_type) {
-                    if(ps_priv.charge_type == CHARGETYPE_CYCLE) {
-                        ret = power_supply_get_property(psy, POWER_SUPPLY_PROP_CAPACITY, &capacity);
-                        if(!ret) {
-                            if(capacity.intval >= ps_priv.current_end_threshold) {
-                                switch (model) {
-                                    case air:
-                                    case air_1s:
-                                    case air_1s_limited:
-                                    case air_pro:
-                                    case air_plus_mendo:
-                                    case geek_1s:
-                                    case ayaneo_2s:
-                                    case kun:
-                                            ayaneo_bypass_charge_legacy_open();
-                                            break;
-                                    case air_plus:
-                                    case slide:
-                                            ayaneo_bypass_charge_open();
-                                            break;
-                                    default:
-                                            break;
-                                }
-                            } else if(capacity.intval < ps_priv.current_start_threshold) {
-                                switch (model) {
-                                    case air:
-                                    case air_1s:
-                                    case air_1s_limited:
-                                    case air_pro:
-                                    case air_plus_mendo:
-                                    case geek_1s:
-                                    case ayaneo_2s:
-                                    case kun:
-                                            ayaneo_bypass_charge_legacy_close();
-                                            break;
-                                    case air_plus:
-                                    case slide:
-                                            ayaneo_bypass_charge_close();
-                                            break;
-                                    default:
-                                            break;
-                                }
+        while (!kthread_should_stop())
+        {
+            if(last_charge_type != ps_priv.charge_type) {
+                if(ps_priv.charge_type == CHARGETYPE_LIMIT) {
+                    ret = power_supply_get_property(ps_priv.battery, POWER_SUPPLY_PROP_CAPACITY, &capacity);
+                    if(!ret) {
+                        if(capacity.intval >= ps_priv.current_end_threshold) {
+                            switch (model) {
+                                case air:
+                                case air_1s:
+                                case air_1s_limited:
+                                case air_pro:
+                                case air_plus_mendo:
+                                case geek_1s:
+                                case ayaneo_2s:
+                                case kun:
+                                        ayaneo_bypass_charge_legacy_open();
+                                        break;
+                                case air_plus:
+                                case slide:
+                                        ayaneo_bypass_charge_open();
+                                        break;
+                                default:
+                                        break;
+                            }
+                        } else {
+                            switch (model) {
+                                case air:
+                                case air_1s:
+                                case air_1s_limited:
+                                case air_pro:
+                                case air_plus_mendo:
+                                case geek_1s:
+                                case ayaneo_2s:
+                                case kun:
+                                        ayaneo_bypass_charge_legacy_close();
+                                        break;
+                                case air_plus:
+                                case slide:
+                                        ayaneo_bypass_charge_close();
+                                        break;
+                                default:
+                                        break;
                             }
                         }
-                    } else if (CHARGETYPE_BYPASS == ps_priv.charge_type){
-                        switch (model) {
-                            case air:
-                            case air_1s:
-                            case air_1s_limited:
-                            case air_pro:
-                            case air_plus_mendo:
-                            case geek_1s:
-                            case ayaneo_2s:
-                            case kun:
-                                    ayaneo_bypass_charge_legacy_open();
-                                    break;
-                            case air_plus:
-                            case slide:
-                                    ayaneo_bypass_charge_open();
-                                    break;
-                            default:
-                                    break;
-                        }
-                    } else if (CHARGETYPE_STANDARD == ps_priv.charge_type){
-                        switch (model) {
-                            case air:
-                            case air_1s:
-                            case air_1s_limited:
-                            case air_pro:
-                            case air_plus_mendo:
-                            case geek_1s:
-                            case ayaneo_2s:
-                            case kun:
-                                    ayaneo_bypass_charge_legacy_close();
-                                    break;
-                            case air_plus:
-                            case slide:
-                                    ayaneo_bypass_charge_close();
-                                    break;
-                            default:
-                                    break;
+                    }
+                } else if (CHARGETYPE_BYPASS == ps_priv.charge_type){
+                    ret = power_supply_get_property(ps_priv.battery, POWER_SUPPLY_PROP_CAPACITY, &capacity);
+                    if(!ret) {
+                        if(capacity.intval >= ps_priv.current_end_threshold) {
+                            switch (model) {
+                                case air:
+                                case air_1s:
+                                case air_1s_limited:
+                                case air_pro:
+                                case air_plus_mendo:
+                                case geek_1s:
+                                case ayaneo_2s:
+                                case kun:
+                                        ayaneo_bypass_charge_legacy_open();
+                                        break;
+                                case air_plus:
+                                case slide:
+                                        ayaneo_bypass_charge_open();
+                                        break;
+                                default:
+                                        break;
+                            }
+                        } else if(capacity.intval < ps_priv.current_start_threshold) {
+                            switch (model) {
+                                case air:
+                                case air_1s:
+                                case air_1s_limited:
+                                case air_pro:
+                                case air_plus_mendo:
+                                case geek_1s:
+                                case ayaneo_2s:
+                                case kun:
+                                        ayaneo_bypass_charge_legacy_close();
+                                        break;
+                                case air_plus:
+                                case slide:
+                                        ayaneo_bypass_charge_close();
+                                        break;
+                                default:
+                                        break;
+                            }
                         }
                     }
-                    last_charge_type = ps_priv.charge_type;
+                } else if (CHARGETYPE_STANDARD == ps_priv.charge_type){
+                    switch (model) {
+                        case air:
+                        case air_1s:
+                        case air_1s_limited:
+                        case air_pro:
+                        case air_plus_mendo:
+                        case geek_1s:
+                        case ayaneo_2s:
+                        case kun:
+                                ayaneo_bypass_charge_legacy_close();
+                                break;
+                        case air_plus:
+                        case slide:
+                                ayaneo_bypass_charge_close();
+                                break;
+                        default:
+                                break;
+                    }
                 }
-                msleep(AYANEO_BYPASS_WRITER_DELAY_MS);
+                last_charge_type = ps_priv.charge_type;
             }
-
-            pr_info("Bypass-Writer thread stopped.\n");
+            msleep(AYANEO_BYPASS_WRITER_DELAY_MS);
         }
+
+        pr_info("Bypass-Writer thread stopped.\n");
         return 0;
 }
 
 static int ayaneo_battery_add(struct power_supply *battery, struct acpi_battery_hook *hook)
 {
     /* Ayaneo devices only have one battery. */
-    if (strcmp(battery->desc->name, "BAT0") != 0)
+    if (strcmp(battery->desc->name, "BAT0") != 0 &&
+        strcmp(battery->desc->name, "BAT1") != 0 &&
+        strcmp(battery->desc->name, "BATC") != 0 &&
+        strcmp(battery->desc->name, "BATT") != 0)
         return -ENODEV;
 
     if (device_create_file(&battery->dev,
@@ -1296,6 +1320,7 @@ static int ayaneo_battery_add(struct power_supply *battery, struct acpi_battery_
         return -ENODEV;
     }
 
+    ps_priv.battery = battery;
     return 0;
 }
 
@@ -1338,7 +1363,7 @@ static int ayaneo_check_charge_control(void)
                     version_needed[4] = 78;
                     break;
             case air_1s:
-			case air_1s_limited:
+            case air_1s_limited:
                     version_needed[0] = 8;
                     version_needed[1] = 4;
                     version_needed[2] = 0;
