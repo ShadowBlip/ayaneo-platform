@@ -122,13 +122,12 @@ On most systems this will be mounted/hooked at `/sys/class/power_supply/BAT*/` a
 
 Read/write.
 
-Enables or disables the bypass charge. Accepts a value of "Standard", "Limit" and "Bypass".
+Enables or disables the bypass charge. Accepts a value of "Standard" and "Bypass".
 When reading, the currently selected option will be wrapped in square brackets `[ ]`.
 
 |Value|Description|
 |-|-|
 |"Standard"|Disables the bypass charge. The battery is normally charged.|
-|"Limit"|Enables the bypass charge. Battery charging will depend only on the stop value.|
 |"Bypass"|Enables the bypass charge. Battery charging will depend on the start and stop values.|
 
 Default is "Standard"
@@ -154,15 +153,15 @@ Default is 100.
 The current charge type and end threshold can be retrieved as follows:
 ```shell
 $ cat /sys/class/power_supply/BAT*/charge_type
-[Standard] Limit Bypass
+[Standard] Bypass
 $ cat /sys/class/power_supply/BAT*/charge_control_end_threshold
 100
 ```
 
 New values can be set as follows:
 ```shell
-$ echo "Limit" | sudo tee /sys/class/power_supply/BAT*/charge_type
-Limit
+$ echo "Bypass" | sudo tee /sys/class/power_supply/BAT*/charge_type
+Bypass
 $ echo "80" | sudo tee /sys/class/power_supply/BAT*/charge_control_end_threshold
 80
 ```

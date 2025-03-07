@@ -968,11 +968,10 @@ struct led_classdev_mc ayaneo_led_mc = {
 
 /* Handling bypass charge */
 enum charge_type_value_index {
-    CHARGETYPE_STANDARD, CHARGETYPE_LIMIT, CHARGETYPE_BYPASS,
+    CHARGETYPE_STANDARD, CHARGETYPE_BYPASS,
 };
 static const char * const charge_type_strings[] = {
     [CHARGETYPE_STANDARD] = "Standard",
-    [CHARGETYPE_LIMIT] = "Limit",
     [CHARGETYPE_BYPASS] = "Bypass",
 };
 struct ayaneo_ps_priv {
@@ -1176,50 +1175,7 @@ int ayaneo_bypass_charge_writer(void *pv)
         while (!kthread_should_stop())
         {
             if(last_charge_type != ps_priv.charge_type) {
-                if(ps_priv.charge_type == CHARGETYPE_LIMIT) {
-                    ret = power_supply_get_property(ps_priv.battery, POWER_SUPPLY_PROP_CAPACITY, &capacity);
-                    if(!ret) {
-                        if(capacity.intval >= ps_priv.current_end_threshold) {
-                            switch (model) {
-                                case air:
-                                case air_1s:
-                                case air_1s_limited:
-                                case air_pro:
-                                case air_plus_mendo:
-                                case geek_1s:
-                                case ayaneo_2s:
-                                case kun:
-                                        ayaneo_bypass_charge_legacy_open();
-                                        break;
-                                case air_plus:
-                                case slide:
-                                        ayaneo_bypass_charge_open();
-                                        break;
-                                default:
-                                        break;
-                            }
-                        } else {
-                            switch (model) {
-                                case air:
-                                case air_1s:
-                                case air_1s_limited:
-                                case air_pro:
-                                case air_plus_mendo:
-                                case geek_1s:
-                                case ayaneo_2s:
-                                case kun:
-                                        ayaneo_bypass_charge_legacy_close();
-                                        break;
-                                case air_plus:
-                                case slide:
-                                        ayaneo_bypass_charge_close();
-                                        break;
-                                default:
-                                        break;
-                            }
-                        }
-                    }
-                } else if (CHARGETYPE_BYPASS == ps_priv.charge_type){
+                if (CHARGETYPE_BYPASS == ps_priv.charge_type){
                     ret = power_supply_get_property(ps_priv.battery, POWER_SUPPLY_PROP_CAPACITY, &capacity);
                     if(!ret) {
                         if(capacity.intval >= ps_priv.current_end_threshold) {
