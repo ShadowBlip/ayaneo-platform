@@ -112,58 +112,38 @@ $ echo "255 0 128" | sudo tee /sys/class/leds/ayaneo:rgb:joystick_rings/multi_in
 255 0 128
 ```
 
-### Bypass Charge Control
+### Power Supply Charge Behaviour
 
-Bypass Charge Control can be enabled, disabled, start and stop battery level can be set via sysfs.
+Power Supply Charge Behaviour can be set to Auto or Inhibit Charge via sysfs.
 
 On most systems this will be mounted/hooked at `/sys/class/power_supply/BAT*/` and provides the following files:
 
-#### charge_type
+#### charge_behaviour
 
 Read/write.
 
-Enables or disables the bypass charge. Accepts a value of "Standard" and "Bypass".
+Enables or disables the bypass charge. Accepts a value of "auto" and "inhibit-charge".
 When reading, the currently selected option will be wrapped in square brackets `[ ]`.
 
 |Value|Description|
 |-|-|
-|"Standard"|Disables the bypass charge. The battery is normally charged.|
-|"Bypass"|Enables the bypass charge. Battery charging will depend on the start and stop values.|
+|"auto"|Disables the bypass charge. The battery is normally charged.|
+|"inhibit-charge"|Enables the bypass charge. Battery charging will be stopped.|
 
-Default is "Standard"
-
-#### charge_control_start_threshold
-
-Read/write.
-
-Gets or sets the battery percentage level, below which charging will begin. Valid values between 0 and 100 (percent).
-
-Default is 100.
-
-#### charge_control_end_threshold
-
-Read/write.
-
-Gets or sets the battery percentage level, on or above which charging will stop. Valid values between 0 and 100 (percent).
-
-Default is 100.
+Default is "auto"
 
 #### Identifying and Setting Control Values
 
 The current charge type and end threshold can be retrieved as follows:
 ```shell
 $ cat /sys/class/power_supply/BAT*/charge_type
-[Standard] Bypass
-$ cat /sys/class/power_supply/BAT*/charge_control_end_threshold
-100
+[auto] inhibit-charge
 ```
 
 New values can be set as follows:
 ```shell
-$ echo "Bypass" | sudo tee /sys/class/power_supply/BAT*/charge_type
-Bypass
-$ echo "80" | sudo tee /sys/class/power_supply/BAT*/charge_control_end_threshold
-80
+$ echo "inhibit-charge" | sudo tee /sys/class/power_supply/BAT*/charge_type
+inhibit-charge
 ```
 
 ## Changing Startup Defaults
