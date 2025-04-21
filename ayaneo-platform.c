@@ -967,58 +967,41 @@ struct led_classdev_mc ayaneo_led_mc = {
 };
 
 /* Handling bypass charge */
-enum charge_type_value_index {
-    CHARGETYPE_STANDARD, CHARGETYPE_BYPASS,
-};
-static const char * const charge_type_strings[] = {
-    [CHARGETYPE_STANDARD] = "Standard",
-    [CHARGETYPE_BYPASS] = "Bypass",
-};
 struct ayaneo_ps_priv {
-    u8 charge_type;
+    u8 charge_behaviour;
     u8 bypass_available;
 };
-static struct ayaneo_ps_priv ps_priv = { CHARGETYPE_STANDARD, 0 };
+static struct ayaneo_ps_priv ps_priv = { POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO, 0 };
 
-static ssize_t charge_type_show(struct device *dev,
-                  struct device_attribute *attr, char *buf)
+static int ayaneo_psy_ext_get_prop(struct power_supply *psy, const struct power_supply_ext *ext,
+                  void *data, enum power_supply_property psp, union power_supply_propval *val)
 {
-    bool active;
-    ssize_t count = 0;
-    int i;
-
-    for (i = 0; i <  ARRAY_SIZE(charge_type_strings); i++) {
-            active = i == ps_priv.charge_type;
-            if (active) {
-                    count += sysfs_emit_at(buf, count, "[%s] ",
-                               charge_type_strings[i]);
-            }
-            else {
-                    count += sysfs_emit_at(buf, count, "%s ",
-                               charge_type_strings[i]);
-            }
+    if(psp == POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR) {
+        val->intval = ps_priv.charge_behaviour;
+        return 0;
     }
-
-    if (count)
-        buf[count - 1] = '\n';
-
-    return count;
+    return -EINVAL;
 }
 
-static ssize_t charge_type_store(struct device *dev,
-                   struct device_attribute *attr, const char *buf,
-                   size_t count)
+static int ayaneo_psy_ext_set_prop(struct power_supply *psy, const struct power_supply_ext *ext,
+                  void *data, enum power_supply_property psp, const union power_supply_propval *val)
 {
-    int ret;
-    ret = __sysfs_match_string(charge_type_strings, ARRAY_SIZE(charge_type_strings), buf);
-    if (ret < 0)
-        return ret;
-
-    ps_priv.charge_type = ret;
-    return count;
+    if((psp == POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR) && ((val->intval == POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO) || (val->intval == POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE))) {
+        ps_priv.charge_behaviour = val->intval;
+        return 0;
+    }
+    return -EINVAL;
 }
 
-static DEVICE_ATTR_RW(charge_type);
+static int ayaneo_psy_ext_is_writeable(struct power_supply *psy, const struct power_supply_ext *ext,
+                  void *data, enum power_supply_property psp)
+{
+    if(psp == POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR) {
+        return 1;
+    } else {
+        return -ENOENT;
+    }
+}
 
 /* Function Summary
  * AYANEO devices can be largely divided into 2 groups; modern and legacy.
@@ -1088,11 +1071,11 @@ static void ayaneo_bypass_charge_legacy_close(void)
 }
 /* Threaded writes:
  *  The writer thread's job is to enable or disable the bypass charge function
- *  depending on the POWER_SUPPLY_PROP_CHARGE_TYPE.
+ *  depending on the POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR.
  *
- *  When the writer thread begins its next loop, it checks if it should activate the
- *  bypass charge if POWER_SUPPLY_CHARGE_TYPE_CUSTOM is set. It then saves the
- *  state of charge type and sleeps for some seconds.
+ *  When the writer thread begins its next loop, it checks if it should activate
+ *  the bypass charge if POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE is set. It
+ *  then saves the state of charge behaviour and sleeps for some seconds.
  *
  *  During suspend kthread_stop is called which causes the writer thread to
  *  terminate after its current iteration. The writer thread is restarted during
@@ -1102,13 +1085,13 @@ static struct task_struct *ayaneo_bypass_charge_writer_thread;
 int ayaneo_bypass_charge_writer(void *pv);
 int ayaneo_bypass_charge_writer(void *pv)
 {
-        u8 last_charge_type = 0xff;
+        u8 last_charge_behaviour = 0xff;
         pr_info("Bypass-Writer thread started.\n");
 
         while (!kthread_should_stop())
         {
-            if(last_charge_type != ps_priv.charge_type) {
-                if (CHARGETYPE_BYPASS == ps_priv.charge_type){
+            if(last_charge_behaviour != ps_priv.charge_behaviour) {
+                if (POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE == ps_priv.charge_behaviour){
                     switch (model) {
                         case air:
                         case air_1s:
@@ -1127,7 +1110,7 @@ int ayaneo_bypass_charge_writer(void *pv)
                         default:
                                 break;
                     }
-                } else if (CHARGETYPE_STANDARD == ps_priv.charge_type){
+                } else if(POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO == ps_priv.charge_behaviour) {
                     switch (model) {
                         case air:
                         case air_1s:
@@ -1147,7 +1130,7 @@ int ayaneo_bypass_charge_writer(void *pv)
                                 break;
                     }
                 }
-                last_charge_type = ps_priv.charge_type;
+                last_charge_behaviour = ps_priv.charge_behaviour;
             }
             msleep(AYANEO_BYPASS_WRITER_DELAY_MS);
         }
@@ -1155,6 +1138,20 @@ int ayaneo_bypass_charge_writer(void *pv)
         pr_info("Bypass-Writer thread stopped.\n");
         return 0;
 }
+
+static enum power_supply_property ayaneo_psy_ext_props[] = {
+    POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR,
+};
+
+static struct power_supply_ext ayaneo_psy_ext = {
+    .name = "ayaneo-bypass-charge",
+    .charge_behaviours = BIT(POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO) | BIT(POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE),
+    .properties = ayaneo_psy_ext_props,
+    .num_properties = ARRAY_SIZE(ayaneo_psy_ext_props),
+    .get_property = ayaneo_psy_ext_get_prop,
+    .set_property = ayaneo_psy_ext_set_prop,
+    .property_is_writeable = ayaneo_psy_ext_is_writeable,
+};
 
 static int ayaneo_battery_add(struct power_supply *battery, struct acpi_battery_hook *hook)
 {
@@ -1165,18 +1162,12 @@ static int ayaneo_battery_add(struct power_supply *battery, struct acpi_battery_
         strcmp(battery->desc->name, "BATT") != 0)
         return -ENODEV;
 
-    if (device_create_file(&battery->dev,
-        &dev_attr_charge_type)) {
-        return -ENODEV;
-    }
-
-    return 0;
+    return power_supply_register_extension(battery, &ayaneo_psy_ext, &battery->dev, NULL);
 }
 
 static int ayaneo_battery_remove(struct power_supply *battery, struct acpi_battery_hook *hook)
 {
-    device_remove_file(&battery->dev,
-               &dev_attr_charge_type);
+    power_supply_unregister_extension(battery, &ayaneo_psy_ext);
     return 0;
 }
 
