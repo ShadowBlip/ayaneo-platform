@@ -976,12 +976,9 @@ static const char * const charge_type_strings[] = {
 };
 struct ayaneo_ps_priv {
     u8 charge_type;
-    u8 current_start_threshold;
-    u8 current_end_threshold;
     u8 bypass_available;
-    struct power_supply *battery;
 };
-static struct ayaneo_ps_priv ps_priv = { CHARGETYPE_STANDARD, 100, 100, 0 };
+static struct ayaneo_ps_priv ps_priv = { CHARGETYPE_STANDARD, 0 };
 
 static ssize_t charge_type_show(struct device *dev,
                   struct device_attribute *attr, char *buf)
@@ -1022,66 +1019,6 @@ static ssize_t charge_type_store(struct device *dev,
 }
 
 static DEVICE_ATTR_RW(charge_type);
-
-static ssize_t charge_control_end_threshold_store(struct device *dev,
-                   struct device_attribute *attr, const char *buf,
-                   size_t count)
-{
-    u64 val;
-    int ret;
-
-    ret = kstrtou64(buf, 10, &val);
-    if (ret < 0)
-        return ret;
-
-    if (val < 0 || val > 100) {
-        ret = -EINVAL;
-    } else if (val < ps_priv.current_start_threshold) {
-        ret = -EINVAL;
-    } else {
-        ps_priv.current_end_threshold = val;
-    }
-
-    return count;
-}
-
-static ssize_t charge_control_end_threshold_show(struct device *dev,
-                  struct device_attribute *attr, char *buf)
-{
-    return sysfs_emit(buf, "%d\n", ps_priv.current_end_threshold);
-}
-
-static DEVICE_ATTR_RW(charge_control_end_threshold);
-
-static ssize_t charge_control_start_threshold_store(struct device *dev,
-                   struct device_attribute *attr, const char *buf,
-                   size_t count)
-{
-    u64 val;
-    int ret;
-
-    ret = kstrtou64(buf, 10, &val);
-    if (ret < 0)
-        return ret;
-
-    if (val < 0 || val > 100) {
-        ret = -EINVAL;
-    } else if (val > ps_priv.current_end_threshold) {
-        ret = -EINVAL;
-    } else {
-        ps_priv.current_start_threshold = val;
-    }
-
-    return count;
-}
-
-static ssize_t charge_control_start_threshold_show(struct device *dev,
-                  struct device_attribute *attr, char *buf)
-{
-    return sysfs_emit(buf, "%d\n", ps_priv.current_start_threshold);
-}
-
-static DEVICE_ATTR_RW(charge_control_start_threshold);
 
 /* Function Summary
  * AYANEO devices can be largely divided into 2 groups; modern and legacy.
@@ -1151,12 +1088,10 @@ static void ayaneo_bypass_charge_legacy_close(void)
 }
 /* Threaded writes:
  *  The writer thread's job is to enable or disable the bypass charge function
- *  depending on the POWER_SUPPLY_PROP_CHARGE_CONTROL_START_THRESHOLD,
- *  POWER_SUPPLY_PROP_CHARGE_CONTROL_END_THRESHOLD and POWER_SUPPLY_PROP_CHARGE_TYPE.
+ *  depending on the POWER_SUPPLY_PROP_CHARGE_TYPE.
  *
  *  When the writer thread begins its next loop, it checks if it should activate the
- *  bypass charge if POWER_SUPPLY_CHARGE_TYPE_CUSTOM is set. Then it probes the battery
- *  charge level to determine if battery charging is still allowed. It then saves the
+ *  bypass charge if POWER_SUPPLY_CHARGE_TYPE_CUSTOM is set. It then saves the
  *  state of charge type and sleeps for some seconds.
  *
  *  During suspend kthread_stop is called which causes the writer thread to
@@ -1167,8 +1102,6 @@ static struct task_struct *ayaneo_bypass_charge_writer_thread;
 int ayaneo_bypass_charge_writer(void *pv);
 int ayaneo_bypass_charge_writer(void *pv)
 {
-        int ret = 0;
-        union power_supply_propval capacity;
         u8 last_charge_type = 0xff;
         pr_info("Bypass-Writer thread started.\n");
 
@@ -1176,47 +1109,23 @@ int ayaneo_bypass_charge_writer(void *pv)
         {
             if(last_charge_type != ps_priv.charge_type) {
                 if (CHARGETYPE_BYPASS == ps_priv.charge_type){
-                    ret = power_supply_get_property(ps_priv.battery, POWER_SUPPLY_PROP_CAPACITY, &capacity);
-                    if(!ret) {
-                        if(capacity.intval >= ps_priv.current_end_threshold) {
-                            switch (model) {
-                                case air:
-                                case air_1s:
-                                case air_1s_limited:
-                                case air_pro:
-                                case air_plus_mendo:
-                                case geek_1s:
-                                case ayaneo_2s:
-                                case kun:
-                                        ayaneo_bypass_charge_legacy_open();
-                                        break;
-                                case air_plus:
-                                case slide:
-                                        ayaneo_bypass_charge_open();
-                                        break;
-                                default:
-                                        break;
-                            }
-                        } else if(capacity.intval < ps_priv.current_start_threshold) {
-                            switch (model) {
-                                case air:
-                                case air_1s:
-                                case air_1s_limited:
-                                case air_pro:
-                                case air_plus_mendo:
-                                case geek_1s:
-                                case ayaneo_2s:
-                                case kun:
-                                        ayaneo_bypass_charge_legacy_close();
-                                        break;
-                                case air_plus:
-                                case slide:
-                                        ayaneo_bypass_charge_close();
-                                        break;
-                                default:
-                                        break;
-                            }
-                        }
+                    switch (model) {
+                        case air:
+                        case air_1s:
+                        case air_1s_limited:
+                        case air_pro:
+                        case air_plus_mendo:
+                        case geek_1s:
+                        case ayaneo_2s:
+                        case kun:
+                                ayaneo_bypass_charge_legacy_open();
+                                break;
+                        case air_plus:
+                        case slide:
+                                ayaneo_bypass_charge_open();
+                                break;
+                        default:
+                                break;
                     }
                 } else if (CHARGETYPE_STANDARD == ps_priv.charge_type){
                     switch (model) {
@@ -1257,35 +1166,15 @@ static int ayaneo_battery_add(struct power_supply *battery, struct acpi_battery_
         return -ENODEV;
 
     if (device_create_file(&battery->dev,
-        &dev_attr_charge_control_end_threshold))
-        return -ENODEV;
-
-    if (device_create_file(&battery->dev,
-        &dev_attr_charge_control_start_threshold)) {
-        device_remove_file(&battery->dev,
-                &dev_attr_charge_control_end_threshold);
-        return -ENODEV;
-    }
-
-    if (device_create_file(&battery->dev,
         &dev_attr_charge_type)) {
-        device_remove_file(&battery->dev,
-                &dev_attr_charge_control_end_threshold);
-        device_remove_file(&battery->dev,
-                &dev_attr_charge_control_start_threshold);
         return -ENODEV;
     }
 
-    ps_priv.battery = battery;
     return 0;
 }
 
 static int ayaneo_battery_remove(struct power_supply *battery, struct acpi_battery_hook *hook)
 {
-    device_remove_file(&battery->dev,
-               &dev_attr_charge_control_start_threshold);
-    device_remove_file(&battery->dev,
-               &dev_attr_charge_control_end_threshold);
     device_remove_file(&battery->dev,
                &dev_attr_charge_type);
     return 0;
