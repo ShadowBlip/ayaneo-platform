@@ -1230,12 +1230,12 @@ static int ayaneo_check_charge_control(void)
                     break;
             case air_plus:
             case slide:
-                    version_needed[0] = 0x1b;
-                    version_needed[1] = 0;
+                    version_needed[0] = 0;
+                    version_needed[1] = 0x1b;
                     version_needed[2] = 0;
                     version_needed[3] = 0;
                     version_needed[4] = 0;
-                    version_length = 1;
+                    version_length = 2;
                     break;
             default:
                     return -1;
