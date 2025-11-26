@@ -241,7 +241,6 @@ static const struct dmi_system_id dmi_table[] = {
                         DMI_EXACT_MATCH(DMI_BOARD_NAME, "AYANEO 2S"),
                 },
                 .driver_data = (void *)ayaneo_2s,
-
         },
         {
                 .matches = {
@@ -249,7 +248,6 @@ static const struct dmi_system_id dmi_table[] = {
                         DMI_EXACT_MATCH(DMI_BOARD_NAME, "SuiPlay0X1"),
                 },
                 .driver_data = (void *)ayaneo_2s,
-
         },
         {
                 .matches = {
