@@ -963,6 +963,7 @@ struct mc_subled ayaneo_led_mc_subled_info[] = {
 
 struct led_classdev_mc ayaneo_led_mc = {
         .led_cdev = {
+                .color = LED_COLOR_ID_RGB,
                 .name = "ayaneo:rgb:joystick_rings",
                 .brightness = 0,
                 .max_brightness = 255,
@@ -1045,37 +1046,6 @@ static void ayaneo_bypass_charge_close(void)
     }
 }
 
-static void ayaneo_bypass_charge_legacy_open(void)
-{
-    u8 val;
-        if (!lock_global_acpi_lock())
-                return;
-
-    if(ec_read(AYANEO_BYPASS_CHARGE_CONTROL, &val) == 0) {
-            if(val != AYANEO_BYPASS_CHARGE_OPEN) {
-                ec_write(AYANEO_BYPASS_CHARGE_CONTROL, AYANEO_BYPASS_CHARGE_OPEN);
-        }
-    }
-
-        if (!unlock_global_acpi_lock())
-                return;
-}
-
-static void ayaneo_bypass_charge_legacy_close(void)
-{
-    u8 val;
-        if (!lock_global_acpi_lock())
-                return;
-
-    if(ec_read(AYANEO_BYPASS_CHARGE_CONTROL, &val) == 0) {
-            if(val != AYANEO_BYPASS_CHARGE_CLOSE) {
-                ec_write(AYANEO_BYPASS_CHARGE_CONTROL, AYANEO_BYPASS_CHARGE_CLOSE);
-            }
-    }
-
-        if (!unlock_global_acpi_lock())
-                return;
-}
 /* Threaded writes:
  *  The writer thread's job is to enable or disable the bypass charge function
  *  depending on the POWER_SUPPLY_PROP_CHARGE_BEHAVIOUR.
@@ -1100,16 +1070,6 @@ int ayaneo_bypass_charge_writer(void *pv)
             if(last_charge_behaviour != ps_priv.charge_behaviour) {
                 if (POWER_SUPPLY_CHARGE_BEHAVIOUR_INHIBIT_CHARGE == ps_priv.charge_behaviour){
                     switch (model) {
-                        case air:
-                        case air_1s:
-                        case air_1s_limited:
-                        case air_pro:
-                        case air_plus_mendo:
-                        case geek_1s:
-                        case ayaneo_2s:
-                        case kun:
-                                ayaneo_bypass_charge_legacy_open();
-                                break;
                         case air_plus:
                         case slide:
                                 ayaneo_bypass_charge_open();
@@ -1119,16 +1079,6 @@ int ayaneo_bypass_charge_writer(void *pv)
                     }
                 } else if(POWER_SUPPLY_CHARGE_BEHAVIOUR_AUTO == ps_priv.charge_behaviour) {
                     switch (model) {
-                        case air:
-                        case air_1s:
-                        case air_1s_limited:
-                        case air_pro:
-                        case air_plus_mendo:
-                        case geek_1s:
-                        case ayaneo_2s:
-                        case kun:
-                                ayaneo_bypass_charge_legacy_close();
-                                break;
                         case air_plus:
                         case slide:
                                 ayaneo_bypass_charge_close();
@@ -1197,44 +1147,6 @@ static int ayaneo_check_charge_control(void)
             ec_read(AYANEO_EC_VERSION_REG + index, &version[index]);
         }
         switch (model) {
-            case air:
-            case air_pro:
-                    version_needed[0] = 3;
-                    version_needed[1] = 1;
-                    version_needed[2] = 0;
-                    version_needed[3] = 4;
-                    version_needed[4] = 78;
-                    break;
-            case air_1s:
-            case air_1s_limited:
-                    version_needed[0] = 8;
-                    version_needed[1] = 4;
-                    version_needed[2] = 0;
-                    version_needed[3] = 0;
-                    version_needed[4] = 27;
-                    break;
-            case air_plus_mendo:
-                    version_needed[0] = 7;
-                    version_needed[1] = 0;
-                    version_needed[2] = 0;
-                    version_needed[3] = 0;
-                    version_needed[4] = 13;
-                    break;
-            case ayaneo_2s:
-            case geek_1s:
-                    version_needed[0] = 8;
-                    version_needed[1] = 0;
-                    version_needed[2] = 0;
-                    version_needed[3] = 1;
-                    version_needed[4] = 10;
-                    break;
-            case kun:
-                    version_needed[0] = 8;
-                    version_needed[1] = 3;
-                    version_needed[2] = 0;
-                    version_needed[3] = 0;
-                    version_needed[4] = 63;
-                    break;
             case air_plus:
             case slide:
                     version_needed[0] = 0;
@@ -1420,6 +1332,6 @@ MODULE_DEVICE_TABLE(dmi, dmi_table);
 module_init(ayaneo_platform_init);
 module_exit(ayaneo_platform_exit);
 
-MODULE_AUTHOR("Derek John Clark <derekjohn.clark@gmail.com>");
-MODULE_DESCRIPTION("Platform driver that handles EC sensors of AYANEO x86 devices");
+MODULE_AUTHOR("Derek J. Clark <derekjohn.clark@gmail.com>");
+MODULE_DESCRIPTION("Platform driver for AYANEO x86 devices");
 MODULE_LICENSE("GPL");
